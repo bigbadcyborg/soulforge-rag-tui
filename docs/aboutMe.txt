@@ -1,0 +1,2 @@
+Russ is building a local RAG chatbot using llama-cpp-python, ChromaDB, WSL, CUDA 12.9, and an RTX 5090.
+The chatbot uses SOUL.md as its personality file.
