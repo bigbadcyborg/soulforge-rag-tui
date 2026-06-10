@@ -1,0 +1,1 @@
+wsl -d Ubuntu -- bash -lc "cd /mnt/c/Users/sully/Documents/projects/chatbot-uncensored && ./start-chatbot.sh"

@@ -1,0 +1,26 @@
+# Python / WSL virtual envs
+.venv/
+.venv-wsl/
+venv/
+__pycache__/
+*.pyc
+
+# Local model files
+models/
+*.gguf
+*.bin
+*.safetensors
+
+# RAG/vector DB
+chromaDb/
+*.sqlite3
+*.db
+
+# Local env/config
+.env
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
