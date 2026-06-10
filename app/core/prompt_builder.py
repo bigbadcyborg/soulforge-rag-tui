@@ -60,16 +60,16 @@ class PromptBuilder:
 
         return "\n\n".join(sections)
 
-    def build_user_turn(self, user_input: str, context_text: str = "") -> str:
+    def build_user_turn(self, user_input: str, context_text: str = "", use_rag: bool = True) -> str:
         """Combine retrieved RAG context with the user's question."""
-        if not (self.config.features.rag and context_text.strip()):
+        if not (use_rag and context_text.strip()):
             return user_input
 
         return (
-            "Use the retrieved context below when it is relevant.\n"
-            "If the context does not contain the answer, say that the documents "
-            "do not contain enough information and then answer from general "
-            "knowledge if appropriate.\n\n"
-            f"Retrieved context:\n{context_text}\n\n"
-            f"User question:\n{user_input}"
+            "AVAILABLE CONTEXT FROM DOCUMENTS:\n"
+            f"{context_text}\n\n"
+            "When responding, consider the above context. If it's relevant and helps answer the question, "
+            "incorporate it into your response and mention the source. If the context doesn't contain relevant information, "
+            "answer based on your knowledge and acknowledge the documents didn't cover that topic.\n\n"
+            f"QUESTION:\n{user_input}"
         )

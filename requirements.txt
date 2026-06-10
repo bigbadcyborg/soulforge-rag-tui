@@ -3,3 +3,4 @@
 llama-cpp-python
 chromadb
 PyYAML
+textual

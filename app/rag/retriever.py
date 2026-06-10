@@ -87,6 +87,27 @@ class Retriever:
 
         return chunks
 
+    def get_available_sources(self) -> list[str]:
+        """Return the unique set of document sources in the vector store."""
+        collection = self._get_collection()
+        if collection is None:
+            return []
+
+        try:
+            # Get all documents with metadata to extract unique sources
+            results = collection.get(include=["metadatas"])
+            metadatas = results.get("metadatas") or []
+            sources = set()
+            for metadata in metadatas:
+                if isinstance(metadata, dict):
+                    source = metadata.get("source")
+                    if source:
+                        sources.add(source)
+            return sorted(list(sources))
+        except Exception as error:  # noqa: BLE001 - degrade gracefully
+            print(f"[rag] Failed to get sources: {error}")
+            return []
+
     @staticmethod
     def format_context(chunks: list[RetrievedChunk]) -> str:
         """Render retrieved chunks into a prompt-ready context block."""

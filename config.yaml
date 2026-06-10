@@ -15,7 +15,7 @@ generation:
 
 features:
   soul: true
-  rag: true
+  rag: false
   memory: true
   skills: false
   curator: false

@@ -1,0 +1,78 @@
+Screen {
+    layout: vertical;
+    background: $surface;
+}
+
+#chat-view {
+    height: 1fr;
+    padding: 1 2;
+    background: $surface;
+    scrollbar-size-vertical: 1;
+}
+
+ChatMessage {
+    width: 100%;
+    margin: 0 0 1 0;
+    padding: 0 1;
+}
+
+ChatMessage.role-user {
+    border-left: thick $accent;
+}
+
+ChatMessage.role-assistant {
+    border-left: thick $success;
+}
+
+ChatMessage.role-system {
+    border-left: thick $warning;
+    color: $text-muted;
+}
+
+#prompt {
+    dock: bottom;
+    height: 3;
+    margin: 0 1 1 1;
+}
+
+StatusBar {
+    dock: bottom;
+    height: 1;
+    background: $panel;
+    color: $text;
+}
+
+/* RAG Selection Modal */
+RagSelectionModal {
+    align: center middle;
+    border: solid $primary;
+}
+
+#rag-modal-container {
+    width: 60;
+    height: auto;
+    background: $surface;
+    border: solid $primary;
+    padding: 1 2;
+}
+
+#rag-modal-container > Label {
+    margin-bottom: 1;
+    color: $text;
+}
+
+#rag-modal-container Checkbox {
+    margin: 0 0 1 0;
+}
+
+#button-container {
+    margin-top: 2;
+    height: auto;
+    width: 100%;
+    layout: horizontal;
+    align: center middle;
+}
+
+#button-container Button {
+    margin: 0 1;
+}

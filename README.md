@@ -1,39 +1,46 @@
-# Chatbot Uncensored
+# SoulForge TUI (Chatbot Uncensored)
 
-A local GGUF-based chatbot running through `llama-cpp-python`, with optional GPU acceleration, persona control through `SOUL.md`, and RAG support using ChromaDB.
+A local-first, TUI-based chatbot running GGUF models through `llama-cpp-python`. Supports CUDA GPU acceleration, persona control via `SOUL.md`, and interactive, toggleable RAG with ChromaDB.
 
-This project is designed to run locally inside WSL Ubuntu with CUDA acceleration for NVIDIA GPUs.
+This project is designed to run locally (Windows/WSL) with CUDA acceleration for NVIDIA GPUs.
 
 ## Features
 
-* Local GGUF model inference
-* `llama-cpp-python` backend
-* WSL Ubuntu support
-* NVIDIA GPU acceleration
-* RTX 5090 / Blackwell CUDA build support
-* Persona loading from `SOUL.md`
-* Optional RAG document retrieval with ChromaDB
-* Local document indexing from `docs/`
-* Startup scripts for Windows and WSL
+* **GGUF Inference**: Local `llama-cpp-python` backend for high-performance GGUF models.
+* **Textual TUI**: A structured terminal user interface with chat history, status bar, and interactive commands.
+* **Persona Control**: `SOUL.md` defines your assistant's identity, personality, and tone.
+* **Toggleable RAG**: Enable/disable RAG at runtime with `/rag`.
+* **Interactive Doc Selection**: Use `/rag` to select specific documents from your vector store via a checkbox-based modal.
+* **WSL 2 & CUDA support**: Optimized for NVIDIA GPUs (including Blackwell/RTX 5090) within WSL Ubuntu.
+* **Persona Hot-Reload**: Update `SOUL.md` and reload the character instantly with `/reload-soul`.
+
+## Commands
+
+* `/rag`: Toggle RAG on/off or open document selection modal.
+* `/rag all`: Enable RAG using all documents in the store.
+* `/rag doc1.txt,doc2.txt`: Enable RAG filter for specific document names.
+* `/status`: Show current model and active features.
+* `/reload-soul`: Refresh persona from `SOUL.md` without restarting.
+* `/help`: Display all available commands.
+* `/exit`: Quit the application.
 
 ## Project Structure
 
 ```text
 chatbot-uncensored/
-  chatbot.py
-  ingestDocs.py
-  SOUL.md
-  start-chatbot.sh
-  start-chatbot-windows.ps1
-  README.md
-  .gitignore
-  docs/
-    example.md
-  models/
-    NemoMix-Unleashed-12B-Q4_K_M.gguf
-    embedding-model.gguf
-  chromaDb/
-  .venv-wsl/
+  app/                      # Core application package
+    core/                   # Logic, config, and model runtime
+    memory/                 # Persistent memory management
+    rag/                    # ChromaDB retrieval logic
+    tui/                    # Textual UI components and styles
+  SOUL.md                   # Character persona and instructions
+  config.yaml               # Model and feature configuration
+  ingestDocs.py             # Script to index documents into ChromaDB
+  start-chatbot.sh          # WSL startup script
+  start-chatbot-windows.ps1 # Windows PowerShell startup script
+  docs/                     # Source documents for RAG
+  models/                   # GGUF model files
+  chromaDb/                 # ChromaDB vector store
 ```
 
 ## Requirements
