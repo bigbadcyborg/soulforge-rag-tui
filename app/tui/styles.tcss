@@ -324,3 +324,120 @@ MemoryReviewModal {
     width: 100%;
     color: $text-muted;
 }
+
+/* Kanban Modals */
+#kanban-board-container {
+    width: 90;
+    height: 34;
+    background: $surface;
+    border: solid $primary;
+    padding: 1 2;
+}
+
+#kanban-columns {
+    height: 1fr;
+    margin-bottom: 1;
+}
+
+.kanban-column {
+    width: 1fr;
+    height: 100%;
+    border: solid $panel;
+    padding: 0 1;
+    margin: 0 1;
+}
+
+.kanban-column-scroll {
+    height: 1fr;
+    scrollbar-size-vertical: 1;
+}
+
+.kanban-task-item {
+    width: 100%;
+    margin-bottom: 1;
+}
+
+.kanban-empty {
+    color: $text-muted;
+    padding: 1 0;
+}
+
+#task-detail-container {
+    width: 52;
+    height: 28;
+    max-height: 85%;
+    background: $surface;
+    border: solid $primary;
+    padding: 1 2;
+}
+
+#task-create-container,
+#task-suggestion-container {
+    width: 52;
+    height: auto;
+    max-height: 85%;
+    background: $surface;
+    border: solid $primary;
+    padding: 1 2;
+}
+
+#task-detail-scroll {
+    height: 1fr;
+    margin-top: 1;
+    border: solid $panel;
+    padding: 0 1;
+    scrollbar-size-vertical: 1;
+}
+
+#task-suggestion-scroll {
+    height: 1fr;
+    margin-bottom: 1;
+    border: solid $panel;
+    padding: 0 1;
+}
+
+#task-suggestion-container {
+    width: 70;
+    height: 28;
+}
+
+#task-detail-button-container {
+    width: 100%;
+    height: auto;
+    layout: vertical;
+    margin-top: 1;
+    padding-bottom: 1;
+}
+
+#task-detail-button-container Label {
+    margin-bottom: 1;
+    color: $text-muted;
+}
+
+#task-detail-button-container .task-move-button {
+    width: 100%;
+    margin-bottom: 1;
+}
+
+#task-detail-footer-buttons {
+    width: 100%;
+    height: auto;
+    layout: horizontal;
+    align: center middle;
+    margin-top: 1;
+}
+
+#task-detail-footer-buttons Button {
+    width: 1fr;
+    margin: 0 1;
+}
+
+#task-detail-content,
+#task-suggestion-content {
+    width: 100%;
+    color: $text-muted;
+}
+
+#task-create-container Input {
+    margin-bottom: 1;
+}

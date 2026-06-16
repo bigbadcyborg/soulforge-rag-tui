@@ -318,6 +318,79 @@ def _handle_curator_cli(controller: ChatController) -> None:
     print(controller.get_curator_review())
 
 
+def _handle_tasks_cli(controller: ChatController) -> None:
+    print(controller.get_board_view())
+    pending = controller._visible_task_suggestions()
+    if pending:
+        print()
+        print(controller.get_task_suggestions_review())
+        print("\nApprove: /task-accept <suggestion_id>")
+        print("Reject:  /task-reject <suggestion_id>")
+
+
+def _handle_task_new_cli(controller: ChatController, args: str) -> None:
+    if not args.strip():
+        print("Usage: /task-new <title>  (TUI supports modal without title)")
+        return
+    outcome = controller.create_task_direct(args.strip())
+    print(outcome.message)
+
+
+def _handle_task_move_cli(controller: ChatController, args: str) -> None:
+    parts = args.split(maxsplit=1)
+    if len(parts) < 2:
+        print("Usage: /task-move <id> <column>")
+        return
+    outcome = controller.move_task_direct(parts[0], parts[1])
+    print(outcome.message)
+
+
+def _handle_task_done_cli(controller: ChatController, args: str) -> None:
+    if not args.strip():
+        print("Usage: /task-done <id>")
+        return
+    outcome = controller.move_task_direct(args.strip(), "done")
+    print(outcome.message)
+
+
+def _handle_task_delete_cli(controller: ChatController, args: str) -> None:
+    if not args.strip():
+        print("Usage: /task-delete <id>")
+        return
+    outcome = controller.delete_task_direct(args.strip())
+    print(outcome.message)
+
+
+def _handle_task_suggest_cli(controller: ChatController) -> None:
+    result = controller.run_task_suggest()
+    if result.message:
+        print(result.message)
+    if result.has_suggestions:
+        print()
+        print(controller.get_task_suggestions_review())
+        print("\nApprove: /task-accept <suggestion_id>")
+        print("Reject:  /task-reject <suggestion_id>")
+
+
+def _handle_task_accept_cli(controller: ChatController, args: str) -> None:
+    suggestion_id = args.strip()
+    if not suggestion_id:
+        print("Usage: /task-accept <suggestion_id>")
+        print(controller.get_task_suggestions_review())
+        return
+    outcome = controller.accept_task_suggestion(suggestion_id)
+    print(outcome.message)
+
+
+def _handle_task_reject_cli(controller: ChatController, args: str) -> None:
+    suggestion_id = args.strip()
+    if not suggestion_id:
+        print("Usage: /task-reject <suggestion_id>")
+        return
+    controller.dismiss_task_suggestion(suggestion_id)
+    print("Task suggestion rejected.")
+
+
 def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
     """Handle CLI commands. Return True if should continue, False if should exit."""
     parts = cmd.split(maxsplit=1)
@@ -392,6 +465,22 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
         _handle_curator_accept_cli(controller, args)
     elif command == "/curator-ignore":
         _handle_curator_ignore_cli(controller, args)
+    elif command == "/tasks":
+        _handle_tasks_cli(controller)
+    elif command == "/task-new":
+        _handle_task_new_cli(controller, args)
+    elif command == "/task-move":
+        _handle_task_move_cli(controller, args)
+    elif command == "/task-done":
+        _handle_task_done_cli(controller, args)
+    elif command == "/task-delete":
+        _handle_task_delete_cli(controller, args)
+    elif command == "/task-suggest":
+        _handle_task_suggest_cli(controller)
+    elif command == "/task-accept":
+        _handle_task_accept_cli(controller, args)
+    elif command == "/task-reject":
+        _handle_task_reject_cli(controller, args)
     else:
         print(f"Unknown command: {command}. Type /help for available commands.")
 

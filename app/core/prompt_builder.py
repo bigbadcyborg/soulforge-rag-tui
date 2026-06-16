@@ -46,6 +46,13 @@ MEMORY_GROUNDING_RULES = (
 
 DEFAULT_SYSTEM_PROMPT = "You are a helpful local chatbot."
 
+TASK_GROUNDING_RULES = (
+    "IMPORTANT - TASK BOARD (READ-ONLY):\n"
+    "The # Active Tasks section below is the current Kanban board. You cannot "
+    "modify it during chat. To persist task changes, the user runs /task-suggest "
+    "and approves suggestions in the review modal."
+)
+
 
 class PromptBuilder:
     """Builds system prompts and user turns from toggled feature inputs."""
@@ -58,6 +65,7 @@ class PromptBuilder:
         soul_text: str = "",
         memory: MemorySnapshot | None = None,
         skills: list[str] | None = None,
+        task_summary: str = "",
     ) -> str:
         features = self.config.features
         sections: list[str] = []
@@ -89,6 +97,10 @@ class PromptBuilder:
         if features.skills and skills:
             sections.append("# Relevant Skills")
             sections.extend(skills)
+
+        if features.kanban and task_summary.strip():
+            sections.append(TASK_GROUNDING_RULES)
+            sections.append(f"# Active Tasks\n{task_summary.strip()}")
 
         if not sections:
             return DEFAULT_SYSTEM_PROMPT

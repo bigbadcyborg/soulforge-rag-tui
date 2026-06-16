@@ -172,6 +172,10 @@ class CuratorConfig:
 class TasksConfig:
     kanban_path: str = "./app/tasks/kanban.json"
 
+    @property
+    def kanban_file(self) -> Path:
+        return resolve_path(self.kanban_path)
+
 
 @dataclass
 class AppConfig:

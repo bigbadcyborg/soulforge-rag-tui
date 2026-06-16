@@ -162,6 +162,46 @@ COMMANDS: tuple[CommandHelp, ...] = (
         "/curator-ignore <id>",
         "Dismiss a curator finding by ID (CLI)",
     ),
+    CommandHelp(
+        "Kanban",
+        "/tasks",
+        "Open Kanban board modal (TUI) or print board (CLI)",
+    ),
+    CommandHelp(
+        "Kanban",
+        "/task-new [title]",
+        "Create a task in Backlog (modal if no title in TUI)",
+    ),
+    CommandHelp(
+        "Kanban",
+        "/task-move <id> <column>",
+        "Move a task (backlog, in_progress, blocked, done)",
+    ),
+    CommandHelp(
+        "Kanban",
+        "/task-done <id>",
+        "Move a task to Done",
+    ),
+    CommandHelp(
+        "Kanban",
+        "/task-delete <id>",
+        "Delete a task from the board",
+    ),
+    CommandHelp(
+        "Kanban",
+        "/task-suggest",
+        "Suggest task updates from recent conversation (requires approval)",
+    ),
+    CommandHelp(
+        "Kanban",
+        "/task-accept <id>",
+        "Apply a pending task suggestion by ID (CLI; TUI uses Approve in modal)",
+    ),
+    CommandHelp(
+        "Kanban",
+        "/task-reject <id>",
+        "Dismiss a pending task suggestion by ID (CLI)",
+    ),
 )
 
 

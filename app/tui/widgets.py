@@ -15,6 +15,8 @@ from app.memory.memory_manager import SECTION_FILENAMES
 from app.memory.memory_reviewer import MemorySuggestion
 from app.skills.skill_crystallizer import SkillSuggestion
 from app.skills.curator import CuratorFinding, format_finding_view
+from app.tasks.task_manager import COLUMN_LABELS, COLUMNS, Task
+from app.tasks.task_suggester import TaskSuggestion, format_suggestion_view
 from app.rag.retriever import RetrievedChunk, Retriever
 
 ROLE_LABELS = {
@@ -192,7 +194,7 @@ FEATURE_TOGGLE_DESCRIPTIONS: dict[str, str] = {
     "memory": "Load user.md, memory.md, and session.md into the system prompt.",
     "skills": "Inject reusable workflow skills into prompts. (coming soon)",
     "curator": "Review and maintain skills and memory quality. (coming soon)",
-    "kanban": "Track tasks on a local Kanban board. (coming soon)",
+    "kanban": "Track tasks on a local Kanban board with /tasks and /task-suggest.",
     "show_sources": "List retrieved document sources after each reply.",
     "streaming": "Stream model tokens into the chat as they are generated.",
 }
@@ -556,3 +558,163 @@ class SkillCreateModal(ModalScreen):
             else:
                 # Basic validation: could use a tooltip or status label here
                 pass
+
+
+class KanbanBoardModal(ModalScreen):
+    """Modal for viewing the four-column Kanban board."""
+
+    def __init__(
+        self,
+        board: dict[str, list[Task]],
+        pending_count: int = 0,
+    ) -> None:
+        super().__init__()
+        self.board = board
+        self.pending_count = pending_count
+
+    def compose(self):
+        header = "Kanban Board"
+        if self.pending_count:
+            header += f" ({self.pending_count} suggestion(s) pending)"
+        with Vertical(id="kanban-board-container"):
+            yield Label(header)
+            with Horizontal(id="kanban-columns"):
+                for column in COLUMNS:
+                    tasks = self.board.get(column, [])
+                    with Vertical(classes="kanban-column"):
+                        yield Label(f"{COLUMN_LABELS[column]} ({len(tasks)})")
+                        with VerticalScroll(classes="kanban-column-scroll"):
+                            if not tasks:
+                                yield Static("(empty)", classes="kanban-empty")
+                            for task in tasks:
+                                yield Button(
+                                    f"[{task.id}] {task.title}",
+                                    id=f"task_btn_{task.id}",
+                                    classes="kanban-task-item",
+                                )
+            with Container(id="button-container"):
+                yield Button("New Task", id="new-task-button", variant="success")
+                if self.pending_count:
+                    yield Button(
+                        "Review Suggestions",
+                        id="review-suggestions-button",
+                        variant="primary",
+                    )
+                yield Button("Close", id="close-button")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "close-button":
+            self.dismiss(None)
+        elif event.button.id == "new-task-button":
+            self.dismiss("new")
+        elif event.button.id == "review-suggestions-button":
+            self.dismiss("review")
+        elif event.button.id and event.button.id.startswith("task_btn_"):
+            task_id = event.button.id.replace("task_btn_", "", 1)
+            self.dismiss(("view", task_id))
+
+
+class TaskDetailModal(ModalScreen):
+    """Modal for viewing and managing a single task."""
+
+    def __init__(self, column: str, task: Task) -> None:
+        super().__init__()
+        self.column = column
+        self.kanban_task = task
+
+    def compose(self):
+        column_label = COLUMN_LABELS.get(self.column, self.column)
+        detail = (
+            f"ID: {self.kanban_task.id}\n"
+            f"Column: {column_label}\n"
+            f"Created: {self.kanban_task.created_at}\n"
+            f"Updated: {self.kanban_task.updated_at}\n\n"
+            f"{self.kanban_task.description or '(no description)'}"
+        )
+        with Vertical(id="task-detail-container"):
+            yield Label(f"Task: {self.kanban_task.title}")
+            with VerticalScroll(id="task-detail-scroll"):
+                yield Static(detail, id="task-detail-content")
+                with Vertical(id="task-detail-button-container"):
+                    yield Label("Move to:")
+                    for column in COLUMNS:
+                        if column == self.column:
+                            continue
+                        label = COLUMN_LABELS[column]
+                        yield Button(
+                            label,
+                            id=f"move_{column}",
+                            variant="primary",
+                            classes="task-move-button",
+                        )
+                    with Horizontal(id="task-detail-footer-buttons"):
+                        yield Button("Delete", id="delete-button", variant="error")
+                        yield Button("Close", id="close-button")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "close-button":
+            self.dismiss(None)
+        elif event.button.id == "delete-button":
+            self.dismiss(("delete", self.kanban_task.id))
+        elif event.button.id and event.button.id.startswith("move_"):
+            target = event.button.id.replace("move_", "", 1)
+            self.dismiss(("move", self.kanban_task.id, target))
+
+
+class TaskCreateModal(ModalScreen):
+    """Modal for creating a new task."""
+
+    def compose(self):
+        with Vertical(id="task-create-container"):
+            yield Label("Create New Task")
+            yield Label("Title:")
+            yield Input(placeholder="Task title", id="task-title-input")
+            yield Label("Description (optional):")
+            yield TextArea(id="task-desc-textarea")
+            with Container(id="button-container"):
+                yield Button("Create", id="create-button", variant="success")
+                yield Button("Cancel", id="cancel-button")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "cancel-button":
+            self.dismiss(None)
+        elif event.button.id == "create-button":
+            title = self.query_one("#task-title-input", Input).value.strip()
+            description = self.query_one("#task-desc-textarea", TextArea).text.strip()
+            if title:
+                self.dismiss({"title": title, "description": description})
+
+
+class TaskSuggestionModal(ModalScreen):
+    """Modal for reviewing and approving task suggestions one at a time."""
+
+    def __init__(
+        self,
+        suggestion: TaskSuggestion,
+        index: int,
+        total: int,
+    ) -> None:
+        super().__init__()
+        self.suggestion = suggestion
+        self.index = index
+        self.total = total
+
+    def compose(self):
+        preview = format_suggestion_view(self.suggestion, self.index, self.total)
+        with Vertical(id="task-suggestion-container"):
+            yield Label(f"Task suggestion ({self.index + 1}/{self.total}):")
+            with VerticalScroll(id="task-suggestion-scroll"):
+                yield Static(preview, id="task-suggestion-content")
+            with Container(id="button-container"):
+                yield Button("Approve", id="approve-button", variant="primary")
+                yield Button("Ignore", id="ignore-button")
+                yield Button("Close", id="close-button")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "close-button":
+            self.dismiss(None)
+        elif event.button.id == "approve-button":
+            self.dismiss(("approve", self.suggestion.suggestion_id))
+        elif event.button.id == "ignore-button":
+            self.dismiss(("ignore", self.suggestion.suggestion_id))
+

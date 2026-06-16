@@ -35,6 +35,10 @@ from app.tui.widgets import (
     SkillCrystallizeModal,
     SkillCrystallizeEditModal,
     CuratorReviewModal,
+    KanbanBoardModal,
+    TaskDetailModal,
+    TaskCreateModal,
+    TaskSuggestionModal,
 )
 
 
@@ -655,6 +659,173 @@ class SoulForgeApp(App):
         if outcome.success:
             self._refresh_features()
 
+    def _handle_tasks_command(self) -> None:
+        if not self.controller.features.is_enabled("kanban"):
+            self._write_message("system", "Kanban is disabled. Run /features kanban on.")
+            return
+        board = self.controller.task_manager.list_board()
+        pending = self.controller._visible_task_suggestions()
+        modal = KanbanBoardModal(board, pending_count=len(pending))
+        self.app.push_screen(modal, self._handle_tasks_modal_result)
+
+    def _handle_tasks_modal_result(self, result) -> None:
+        if result == "new":
+            self.app.push_screen(TaskCreateModal(), self._handle_task_create_result)
+        elif result == "review":
+            self._open_task_suggestion_modal()
+        elif isinstance(result, tuple) and result[0] == "view":
+            task_id = result[1]
+            located = self.controller.task_manager.get_task(task_id)
+            if located:
+                column, task = located
+                modal = TaskDetailModal(column, task)
+                self.app.push_screen(modal, self._handle_task_detail_result)
+        elif result is None:
+            return
+        else:
+            self._handle_tasks_command()
+
+    def _handle_task_detail_result(self, result) -> None:
+        if result is None:
+            self._handle_tasks_command()
+            return
+        if isinstance(result, tuple) and result[0] == "move":
+            _, task_id, column = result
+            outcome = self.controller.move_task_direct(task_id, column)
+            self._write_message("system", outcome.message)
+            if outcome.success:
+                self._refresh_features()
+        elif isinstance(result, tuple) and result[0] == "delete":
+            _, task_id = result
+            outcome = self.controller.delete_task_direct(task_id)
+            self._write_message("system", outcome.message)
+            if outcome.success:
+                self._refresh_features()
+        self._handle_tasks_command()
+
+    def _handle_task_create_result(self, result: dict[str, str] | None) -> None:
+        if result:
+            outcome = self.controller.create_task_direct(
+                result["title"],
+                result.get("description", ""),
+            )
+            self._write_message("system", outcome.message)
+            if outcome.success:
+                self._refresh_features()
+        self._handle_tasks_command()
+
+    def _handle_task_new_modal_result(self, result: dict[str, str] | None) -> None:
+        if result:
+            outcome = self.controller.create_task_direct(
+                result["title"],
+                result.get("description", ""),
+            )
+            self._write_message("system", outcome.message)
+            if outcome.success:
+                self._refresh_features()
+
+    def _handle_task_new_command(self, args: str) -> None:
+        if not self.controller.features.is_enabled("kanban"):
+            self._write_message("system", "Kanban is disabled. Run /features kanban on.")
+            return
+        if args.strip():
+            outcome = self.controller.create_task_direct(args.strip())
+            self._write_message("system", outcome.message)
+            if outcome.success:
+                self._refresh_features()
+        else:
+            self.app.push_screen(TaskCreateModal(), self._handle_task_new_modal_result)
+
+    def _handle_task_move_command(self, args: str) -> None:
+        parts = args.split(maxsplit=1)
+        if len(parts) < 2:
+            self._write_message(
+                "system",
+                "Usage: /task-move <id> <column>  (backlog, in_progress, blocked, done)",
+            )
+            return
+        outcome = self.controller.move_task_direct(parts[0], parts[1])
+        self._write_message("system", outcome.message)
+        if outcome.success:
+            self._refresh_features()
+
+    def _handle_task_done_command(self, args: str) -> None:
+        if not args.strip():
+            self._write_message("system", "Usage: /task-done <id>")
+            return
+        outcome = self.controller.move_task_direct(args.strip(), "done")
+        self._write_message("system", outcome.message)
+        if outcome.success:
+            self._refresh_features()
+
+    def _handle_task_delete_command(self, args: str) -> None:
+        if not args.strip():
+            self._write_message("system", "Usage: /task-delete <id>")
+            return
+        outcome = self.controller.delete_task_direct(args.strip())
+        self._write_message("system", outcome.message)
+        if outcome.success:
+            self._refresh_features()
+
+    def _open_task_suggestion_modal(self) -> None:
+        suggestions = self.controller._visible_task_suggestions()
+        if not suggestions:
+            self._write_message(
+                "system",
+                "No pending task suggestions. Run /task-suggest first.",
+            )
+            return
+        modal = TaskSuggestionModal(suggestions[0], 0, len(suggestions))
+        self.app.push_screen(modal, self._handle_task_suggestion_result)
+
+    def _handle_task_suggestion_result(self, result: tuple[str, str] | None) -> None:
+        if result is None:
+            return
+        action, suggestion_id = result
+        if action == "approve":
+            outcome = self.controller.accept_task_suggestion(suggestion_id)
+            self._write_message("system", outcome.message)
+            if outcome.success:
+                self._refresh_features()
+        elif action == "ignore":
+            self.controller.dismiss_task_suggestion(suggestion_id)
+            self._write_message("system", "Task suggestion ignored.")
+
+        remaining = self.controller._visible_task_suggestions()
+        if remaining:
+            self._open_task_suggestion_modal()
+
+    def _handle_task_suggest_command(self) -> None:
+        if not self.controller.features.is_enabled("kanban"):
+            self._write_message("system", "Kanban is disabled. Run /features kanban on.")
+            return
+        self.status_bar.set_state("Analyzing conversation for task updates...")
+        result = self.controller.run_task_suggest()
+        if result.message:
+            self._write_message("system", result.message)
+        self.status_bar.set_state("Ready")
+        if result.has_suggestions:
+            self._open_task_suggestion_modal()
+
+    def _handle_task_accept_command(self, args: str) -> None:
+        suggestion_id = args.strip()
+        if not suggestion_id:
+            self._write_message("system", "Usage: /task-accept <suggestion_id>")
+            self._write_message("system", self.controller.get_task_suggestions_review())
+            return
+        outcome = self.controller.accept_task_suggestion(suggestion_id)
+        self._write_message("system", outcome.message)
+        if outcome.success:
+            self._refresh_features()
+
+    def _handle_task_reject_command(self, args: str) -> None:
+        suggestion_id = args.strip()
+        if not suggestion_id:
+            self._write_message("system", "Usage: /task-reject <suggestion_id>")
+            return
+        self.controller.dismiss_task_suggestion(suggestion_id)
+        self._write_message("system", "Task suggestion rejected.")
+
     def _handle_skills_modal_result(self, result: Any) -> None:
         if result == "new":
             self.app.push_screen(SkillCreateModal(), self._handle_skill_create_result)
@@ -781,6 +952,22 @@ class SoulForgeApp(App):
             self._handle_curator_archive_command(args)
         elif command == "/curator-compact":
             self._handle_curator_compact_command(args)
+        elif command == "/tasks":
+            self._handle_tasks_command()
+        elif command == "/task-new":
+            self._handle_task_new_command(args)
+        elif command == "/task-move":
+            self._handle_task_move_command(args)
+        elif command == "/task-done":
+            self._handle_task_done_command(args)
+        elif command == "/task-delete":
+            self._handle_task_delete_command(args)
+        elif command == "/task-suggest":
+            self._handle_task_suggest_command()
+        elif command == "/task-accept":
+            self._handle_task_accept_command(args)
+        elif command == "/task-reject":
+            self._handle_task_reject_command(args)
         else:
             self._write_message(
                 "system", f"Unknown command: {command}. Type /help."

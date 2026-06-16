@@ -43,6 +43,16 @@ from app.skills.skill_crystallizer import (
 )
 from app.skills.skill_manager import SkillManager
 from app.skills.workflow_observer import WorkflowMarkResult, WorkflowObserver
+from app.tasks.task_manager import COLUMN_LABELS, TaskManager, normalize_column
+from app.tasks.task_suggester import (
+    ACTION_CREATE,
+    ACTION_DELETE,
+    ACTION_MOVE,
+    ACTION_UPDATE,
+    TaskSuggestion,
+    format_suggestions_review,
+    generate_suggestions,
+)
 
 SOUL_PATH = PROJECT_ROOT / "SOUL.md"
 
@@ -75,6 +85,22 @@ class CuratorActionResult:
     message: str = ""
 
 
+@dataclass
+class TaskActionResult:
+    success: bool
+    message: str = ""
+
+
+@dataclass
+class TaskSuggestResult:
+    suggestions: list[TaskSuggestion]
+    message: str = ""
+
+    @property
+    def has_suggestions(self) -> bool:
+        return bool(self.suggestions)
+
+
 def load_soul() -> str:
     """Load the persona from SOUL.md, or fall back to a neutral default."""
     if not SOUL_PATH.exists():
@@ -91,6 +117,7 @@ class ChatController:
         self.prompt_builder = PromptBuilder(config)
         self.memory_manager = MemoryManager(config)
         self.skill_manager = SkillManager(config)
+        self.task_manager = TaskManager(config)
         self.workflow_observer = WorkflowObserver(config)
         self.features = FeatureStateManager(config, on_change=self._on_feature_change)
 
@@ -100,6 +127,8 @@ class ChatController:
         self._pending_crystallize_fingerprint: str = ""
         self.pending_curator_findings: list[CuratorFinding] = []
         self._dismissed_curator_ids: set[str] = set()
+        self.pending_task_suggestions: list[TaskSuggestion] = []
+        self._dismissed_task_suggestion_ids: set[str] = set()
 
         # RAG is initialized lazily to avoid loading embedding model at startup
         self._retriever: Retriever | None = None
@@ -112,7 +141,7 @@ class ChatController:
         self.loaded: bool = False
 
     def _on_feature_change(self, key: str, enabled: bool) -> None:
-        if key in ("soul", "memory", "skills"):
+        if key in ("soul", "memory", "skills", "kanban"):
             self._rebuild_system_prompt()
         elif key == "rag" and enabled and self.selected_sources is None:
             self.selected_sources = self.get_available_sources()
@@ -168,7 +197,17 @@ class ChatController:
                 if content:
                     skills.append(content)
 
-        return self.prompt_builder.build_system_prompt(self.soul_text, self.memory, skills)
+        return self.prompt_builder.build_system_prompt(
+            self.soul_text,
+            self.memory,
+            skills,
+            task_summary=self._task_summary_for_prompt(),
+        )
+
+    def _task_summary_for_prompt(self) -> str:
+        if not self.features.is_enabled("kanban"):
+            return ""
+        return self.task_manager.format_board_summary()
 
     def _rebuild_system_prompt(self) -> None:
         """Reload soul/memory content and refresh the system message."""
@@ -668,6 +707,250 @@ class ChatController:
         return CuratorReviewResult(
             findings=[finding],
             message=f"Compaction draft ready for '{skill_name}'.",
+        )
+
+    def get_board_view(self) -> str:
+        if not self.features.is_enabled("kanban"):
+            return "Kanban is disabled. Run /features kanban on."
+        return self.task_manager.format_board_view()
+
+    def create_task_direct(
+        self,
+        title: str,
+        description: str = "",
+    ) -> TaskActionResult:
+        if not self.features.is_enabled("kanban"):
+            return TaskActionResult(
+                success=False,
+                message="Kanban is disabled. Run /features kanban on.",
+            )
+        if not title.strip():
+            return TaskActionResult(success=False, message="Task title required.")
+        task = self.task_manager.create_task(title, description)
+        if task is None:
+            return TaskActionResult(success=False, message="Failed to create task.")
+        self._rebuild_system_prompt()
+        return TaskActionResult(
+            success=True,
+            message=f"Created task [{task.id}] '{task.title}' in Backlog.",
+        )
+
+    def move_task_direct(self, task_id: str, column: str) -> TaskActionResult:
+        if not self.features.is_enabled("kanban"):
+            return TaskActionResult(
+                success=False,
+                message="Kanban is disabled. Run /features kanban on.",
+            )
+        if not task_id.strip():
+            return TaskActionResult(
+                success=False,
+                message="Usage: /task-move <id> <column>",
+            )
+        normalized = normalize_column(column)
+        if normalized is None:
+            return TaskActionResult(
+                success=False,
+                message=(
+                    f"Unknown column '{column}'. "
+                    "Use backlog, in_progress, blocked, or done."
+                ),
+            )
+        located = self.task_manager.get_task(task_id.strip())
+        if located is None:
+            return TaskActionResult(
+                success=False,
+                message=f"Task '{task_id}' not found.",
+            )
+        _, task = located
+        if not self.task_manager.move_task(task.id, normalized):
+            return TaskActionResult(
+                success=False,
+                message=f"Failed to move task '{task.id}'.",
+            )
+        self._prune_obsolete_task_suggestions()
+        self._rebuild_system_prompt()
+        label = COLUMN_LABELS.get(normalized, normalized)
+        return TaskActionResult(
+            success=True,
+            message=f"Moved task [{task.id}] '{task.title}' to {label}.",
+        )
+
+    def delete_task_direct(self, task_id: str) -> TaskActionResult:
+        if not self.features.is_enabled("kanban"):
+            return TaskActionResult(
+                success=False,
+                message="Kanban is disabled. Run /features kanban on.",
+            )
+        if not task_id.strip():
+            return TaskActionResult(success=False, message="Task ID required.")
+        located = self.task_manager.get_task(task_id.strip())
+        if located is None:
+            return TaskActionResult(
+                success=False,
+                message=f"Task '{task_id}' not found.",
+            )
+        _, task = located
+        if not self.task_manager.delete_task(task.id):
+            return TaskActionResult(
+                success=False,
+                message=f"Failed to delete task '{task.id}'.",
+            )
+        self._dismiss_suggestions_for_task(task.id)
+        self._rebuild_system_prompt()
+        return TaskActionResult(
+            success=True,
+            message=f"Deleted task [{task.id}] '{task.title}'.",
+        )
+
+    def _suggestion_still_applicable(self, suggestion: TaskSuggestion) -> bool:
+        if suggestion.action == ACTION_CREATE:
+            return bool(suggestion.title.strip())
+        if suggestion.action in (ACTION_MOVE, ACTION_UPDATE, ACTION_DELETE):
+            return self.task_manager.get_task(suggestion.task_id) is not None
+        return False
+
+    def _prune_obsolete_task_suggestions(self) -> None:
+        for suggestion in self.pending_task_suggestions:
+            if suggestion.suggestion_id in self._dismissed_task_suggestion_ids:
+                continue
+            if not self._suggestion_still_applicable(suggestion):
+                self._dismissed_task_suggestion_ids.add(suggestion.suggestion_id)
+
+    def _visible_task_suggestions(self) -> list[TaskSuggestion]:
+        self._prune_obsolete_task_suggestions()
+        return [
+            suggestion
+            for suggestion in self.pending_task_suggestions
+            if suggestion.suggestion_id not in self._dismissed_task_suggestion_ids
+            and self._suggestion_still_applicable(suggestion)
+        ]
+
+    def _dismiss_suggestions_for_task(self, task_id: str) -> None:
+        for suggestion in self.pending_task_suggestions:
+            if suggestion.task_id == task_id:
+                self._dismissed_task_suggestion_ids.add(suggestion.suggestion_id)
+
+    def get_task_suggestions_review(self) -> str:
+        return format_suggestions_review(self._visible_task_suggestions())
+
+    def dismiss_task_suggestion(self, suggestion_id: str) -> None:
+        self._dismissed_task_suggestion_ids.add(suggestion_id)
+
+    def clear_task_suggestions(self) -> None:
+        self.pending_task_suggestions = []
+        self._dismissed_task_suggestion_ids.clear()
+
+    def run_task_suggest(self) -> TaskSuggestResult:
+        if not self.features.is_enabled("kanban"):
+            return TaskSuggestResult(
+                suggestions=[],
+                message="Kanban is disabled. Run /features kanban on.",
+            )
+        suggestions = generate_suggestions(
+            self.runtime,
+            self.task_manager,
+            self.messages,
+            self.config,
+        )
+        self.pending_task_suggestions = suggestions
+        self._dismissed_task_suggestion_ids.clear()
+        if not suggestions:
+            return TaskSuggestResult(
+                suggestions=[],
+                message="No task updates suggested from recent conversation.",
+            )
+        return TaskSuggestResult(
+            suggestions=suggestions,
+            message=f"{len(suggestions)} task suggestion(s) ready for review.",
+        )
+
+    def accept_task_suggestion(self, suggestion_id: str) -> TaskActionResult:
+        if not self.features.is_enabled("kanban"):
+            return TaskActionResult(
+                success=False,
+                message="Kanban is disabled. Run /features kanban on.",
+            )
+
+        self._prune_obsolete_task_suggestions()
+        suggestion = next(
+            (
+                item
+                for item in self.pending_task_suggestions
+                if item.suggestion_id == suggestion_id
+            ),
+            None,
+        )
+        if suggestion is None:
+            return TaskActionResult(
+                success=False,
+                message=f"Suggestion '{suggestion_id}' not found.",
+            )
+
+        if not self._suggestion_still_applicable(suggestion):
+            self._dismissed_task_suggestion_ids.add(suggestion_id)
+            return TaskActionResult(
+                success=True,
+                message="Suggestion no longer applies. Cleared.",
+            )
+
+        if suggestion.action == ACTION_CREATE:
+            task = self.task_manager.create_task(
+                suggestion.title,
+                suggestion.description,
+                suggestion.target_column or "backlog",
+            )
+            if task is None:
+                return TaskActionResult(success=False, message="Failed to create task.")
+            self._dismissed_task_suggestion_ids.add(suggestion_id)
+            self._rebuild_system_prompt()
+            return TaskActionResult(
+                success=True,
+                message=f"Created task [{task.id}] '{task.title}'.",
+            )
+
+        if suggestion.action == ACTION_MOVE:
+            if not self.task_manager.move_task(
+                suggestion.task_id,
+                suggestion.target_column,
+            ):
+                return TaskActionResult(success=False, message="Failed to move task.")
+            self._dismiss_suggestions_for_task(suggestion.task_id)
+            self._rebuild_system_prompt()
+            return TaskActionResult(
+                success=True,
+                message=f"Moved task [{suggestion.task_id}] to {suggestion.target_column}.",
+            )
+
+        if suggestion.action == ACTION_UPDATE:
+            kwargs: dict[str, str] = {}
+            if suggestion.title:
+                kwargs["title"] = suggestion.title
+            if suggestion.description:
+                kwargs["description"] = suggestion.description
+            if not self.task_manager.update_task(suggestion.task_id, **kwargs):
+                return TaskActionResult(success=False, message="Failed to update task.")
+            self._dismiss_suggestions_for_task(suggestion.task_id)
+            self._rebuild_system_prompt()
+            return TaskActionResult(
+                success=True,
+                message=f"Updated task [{suggestion.task_id}].",
+            )
+
+        if suggestion.action == ACTION_DELETE:
+            located = self.task_manager.get_task(suggestion.task_id)
+            title = located[1].title if located else suggestion.task_id
+            if not self.task_manager.delete_task(suggestion.task_id):
+                return TaskActionResult(success=False, message="Failed to delete task.")
+            self._dismiss_suggestions_for_task(suggestion.task_id)
+            self._rebuild_system_prompt()
+            return TaskActionResult(
+                success=True,
+                message=f"Deleted task [{suggestion.task_id}] '{title}'.",
+            )
+
+        return TaskActionResult(
+            success=False,
+            message=f"Unknown action '{suggestion.action}'.",
         )
 
     def add_user_turn(self, user_input: str) -> list[RetrievedChunk]:
