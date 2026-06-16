@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from app.utils.guards import format_startup_error
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import VerticalScroll
@@ -17,11 +18,13 @@ from textual.widgets import Input
 from app.core.chat_controller import ChatController
 from app.core.commands import format_help_text
 from app.core.compute_backend import UNKNOWN
-from app.core.config import FEATURE_DISPLAY_NAMES, load_config
+from app.core.config import FEATURE_DISPLAY_NAMES
+from app.main import bootstrap
 from app.rag.retriever import RetrievedChunk, Retriever
 from app.memory.memory_manager import SECTION_KEYS
 from app.tui.widgets import (
     ChatMessage,
+    DiagnosticsModal,
     FeatureToggleModal,
     MemoryEditModal,
     MemoryReviewModal,
@@ -55,9 +58,14 @@ class SoulForgeApp(App):
         ("ctrl+q", "quit", "Quit"),
     ]
 
-    def __init__(self, controller: ChatController) -> None:
+    def __init__(
+        self,
+        controller: ChatController,
+        startup_report=None,
+    ) -> None:
         super().__init__()
         self.controller = controller
+        self.startup_report = startup_report
         self.models_ready = False
 
     def compose(self) -> ComposeResult:
@@ -90,6 +98,13 @@ class SoulForgeApp(App):
             "Welcome to SoulForge TUI. Loading the model, please wait...\n"
             "Type /help for commands.",
         )
+        if self.startup_report is not None:
+            issues = self.startup_report.error_count + self.startup_report.warning_count
+            if issues:
+                self._write_message(
+                    "system",
+                    f"{issues} setup issue(s) detected — run /diagnostics for details.",
+                )
         self._load_models()
 
     # --- workers -------------------------------------------------------------
@@ -99,7 +114,9 @@ class SoulForgeApp(App):
         try:
             self.controller.load()
         except Exception as error:  # noqa: BLE001 - surface any load failure
-            self.call_from_thread(self._on_load_failed, str(error))
+            self.call_from_thread(
+                self._on_load_failed, format_startup_error(error)
+            )
             return
         self.call_from_thread(self._on_models_loaded)
 
@@ -176,8 +193,8 @@ class SoulForgeApp(App):
         self.status_bar.set_state("Load failed")
         self._write_message(
             "system",
-            f"Failed to load model: {error}\n"
-            "Fix config.yaml and restart, or press Ctrl+Q to quit.",
+            f"{error}\n\n"
+            "Try /diagnostics and /config, then restart or press Ctrl+Q to quit.",
         )
 
     def _generation_done(self) -> None:
@@ -1008,6 +1025,12 @@ class SoulForgeApp(App):
             self._write_message("system", help_text)
         elif command == "/status":
             self._write_message("system", self._status_text())
+        elif command == "/health":
+            self._write_message("system", self.controller.run_health_check())
+        elif command == "/diagnostics":
+            self.push_screen(DiagnosticsModal(self.controller.run_diagnostics()))
+        elif command == "/config":
+            self.push_screen(DiagnosticsModal(self.controller.get_config_view(), title="Configuration"))
         elif command == "/ingest":
             self._handle_ingest_command()
         elif command == "/sources":
@@ -1087,6 +1110,6 @@ class SoulForgeApp(App):
 
 
 def run_tui(config_path: str | Path | None = None) -> None:
-    config = load_config(config_path)
+    config, startup_report = bootstrap(config_path)
     controller = ChatController(config)
-    SoulForgeApp(controller).run()
+    SoulForgeApp(controller, startup_report=startup_report).run()

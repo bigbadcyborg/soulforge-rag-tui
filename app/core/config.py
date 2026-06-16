@@ -188,6 +188,13 @@ class SessionsConfig:
 
 
 @dataclass
+class LoggingConfig:
+    log_path: str = "./logs/soulforge.log"
+    level: str = "info"
+    console: bool = False
+
+
+@dataclass
 class AppConfig:
     model: ModelConfig
     generation: GenerationConfig
@@ -198,6 +205,7 @@ class AppConfig:
     curator: CuratorConfig
     tasks: TasksConfig
     sessions: SessionsConfig
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -308,6 +316,13 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         max_saved_sessions=sessions_section.get("maxSavedSessions", 50),
     )
 
+    logging_section = _section(data, "logging")
+    logging_cfg = LoggingConfig(
+        log_path=logging_section.get("logPath", "./logs/soulforge.log"),
+        level=logging_section.get("level", "info"),
+        console=logging_section.get("console", False),
+    )
+
     return AppConfig(
         model=model,
         generation=generation,
@@ -318,6 +333,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         curator=curator,
         tasks=tasks,
         sessions=sessions,
+        logging=logging_cfg,
         raw=data,
     )
 

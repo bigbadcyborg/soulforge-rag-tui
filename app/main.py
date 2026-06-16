@@ -15,10 +15,54 @@ import argparse
 from app.core.chat_controller import ChatController
 from app.core.commands import format_help_text
 from app.core.config import FEATURE_DISPLAY_NAMES, load_config
+from app.core.diagnostics import format_diagnostics_view, run_startup_diagnostics
 from app.memory.memory_manager import SECTION_FILENAMES, SECTION_KEYS
 from app.rag.retriever import Retriever
+from app.utils.guards import format_startup_error
+from app.utils.logging import get_logger, setup_logging
 
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit"}
+
+
+def _log_startup_report(report) -> None:
+    """Write startup diagnostics summary to the log file."""
+    logger = get_logger("startup")
+    if report.has_errors:
+        logger.error(
+            "Startup diagnostics: %d error(s), %d warning(s)",
+            report.error_count,
+            report.warning_count,
+        )
+    elif report.has_warnings:
+        logger.warning(
+            "Startup diagnostics: %d warning(s)",
+            report.warning_count,
+        )
+    else:
+        logger.info("Startup diagnostics: all checks passed")
+    logger.debug(format_diagnostics_view(report))
+
+
+def _print_startup_issues(report) -> None:
+    """Print startup warnings and errors to stdout before model load."""
+    if not report.has_errors and not report.has_warnings:
+        return
+    for check in report.checks:
+        if check.status in ("error", "warn"):
+            tag = "ERROR" if check.status == "error" else "WARN"
+            print(f"[startup {tag}] {check.name}: {check.message}")
+            if check.remediation:
+                print(f"  → {check.remediation}")
+    print()
+
+
+def bootstrap(config_path=None):
+    """Load config, init logging, and run startup diagnostics."""
+    config = load_config(config_path)
+    setup_logging(config)
+    report = run_startup_diagnostics(config)
+    _log_startup_report(report)
+    return config, report
 
 
 def _handle_features_cli(controller: ChatController, args: str) -> None:
@@ -443,6 +487,12 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
             f"Skill crystallization threshold: "
             f"{controller.config.skills.min_successful_repeats} successes"
         )
+    elif command == "/health":
+        print(controller.run_health_check())
+    elif command == "/diagnostics":
+        print(controller.run_diagnostics())
+    elif command == "/config":
+        print(controller.get_config_view())
     elif command == "/features":
         _handle_features_cli(controller, args)
     elif command == "/ingest":
@@ -526,9 +576,14 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
 
 def run_cli() -> None:
     """Original plain terminal loop, kept as a lightweight fallback."""
-    config = load_config()
+    config, startup_report = bootstrap()
+    _print_startup_issues(startup_report)
     controller = ChatController(config)
-    controller.load()
+    try:
+        controller.load()
+    except Exception as error:  # noqa: BLE001
+        print(format_startup_error(error))
+        raise SystemExit(1) from error
 
     print(f"\nModel: {controller.model_name}")
     print(f"Active features: {controller.features_summary()}")
@@ -590,7 +645,13 @@ def main() -> None:
 
             run_tui()
     except FileNotFoundError as error:
-        print(f"\nStartup error: {error}")
+        print(format_startup_error(error))
+        raise SystemExit(1) from error
+    except ImportError as error:
+        print(format_startup_error(error))
+        raise SystemExit(1) from error
+    except Exception as error:  # noqa: BLE001
+        print(format_startup_error(error))
         raise SystemExit(1) from error
 
 

@@ -279,6 +279,27 @@ class MemoryViewerModal(ModalScreen):
             self.dismiss()
 
 
+class DiagnosticsModal(ModalScreen):
+    """Scrollable modal for /diagnostics and /config output."""
+
+    def __init__(self, content: str, *, title: str = "Diagnostics") -> None:
+        super().__init__()
+        self.content = content
+        self.title_text = title
+
+    def compose(self):
+        with Vertical(id="diagnostics-modal-container"):
+            yield Label(self.title_text)
+            with VerticalScroll(id="diagnostics-scroll"):
+                yield Static(self.content, id="diagnostics-content")
+            with Container(id="button-container"):
+                yield Button("Close", id="close-button", variant="primary")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "close-button":
+            self.dismiss()
+
+
 class MemoryEditModal(ModalScreen):
     """Modal for editing a single memory section."""
 

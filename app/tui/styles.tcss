@@ -199,6 +199,36 @@ MemoryViewerModal {
     color: $text-muted;
 }
 
+/* Diagnostics / Config Modal */
+DiagnosticsModal {
+    align: center middle;
+}
+
+#diagnostics-modal-container {
+    width: 80;
+    height: 28;
+    background: $surface;
+    border: solid $primary;
+    padding: 1 2;
+}
+
+#diagnostics-modal-container > Label {
+    margin-bottom: 1;
+    color: $text;
+}
+
+#diagnostics-scroll {
+    height: 1fr;
+    margin-bottom: 1;
+    border: solid $panel;
+    padding: 0 1;
+}
+
+#diagnostics-content {
+    width: 100%;
+    color: $text-muted;
+}
+
 /* Memory Edit Modal */
 MemoryEditModal {
     align: center middle;

@@ -14,6 +14,12 @@ from typing import Callable, Iterator
 
 from app.core.compute_backend import ComputeBackend
 from app.core.config import PROJECT_ROOT, AppConfig
+from app.core.diagnostics import (
+    format_config_view,
+    format_diagnostics_view,
+    format_health_view,
+    run_startup_diagnostics,
+)
 from app.core.feature_state import FeatureStateManager
 from app.core.model_runtime import ModelRuntime
 from app.core.prompt_builder import PromptBuilder
@@ -1218,6 +1224,54 @@ class ChatController:
             "selected_sources": self.selected_sources,
             "available_sources": self.get_available_sources(),
         }
+
+    def run_health_check(self) -> str:
+        """Short health summary; never raises."""
+        try:
+            detail = None
+            if self.loaded:
+                backend = self.runtime.compute_backend
+                detail = f"{backend.label} ({backend.detail})"
+            report = run_startup_diagnostics(
+                self.config,
+                loaded=self.loaded,
+                compute_detail=detail,
+            )
+            return format_health_view(report)
+        except Exception as error:  # noqa: BLE001
+            return (
+                "Health: UNHEALTHY — diagnostics failed\n\n"
+                f"  [FAIL] Internal error: {error}\n\n"
+                "Run /config to review configuration."
+            )
+
+    def run_diagnostics(self) -> str:
+        """Full diagnostics report; never raises."""
+        try:
+            detail = None
+            if self.loaded:
+                backend = self.runtime.compute_backend
+                detail = f"{backend.label} ({backend.detail})"
+            report = run_startup_diagnostics(
+                self.config,
+                loaded=self.loaded,
+                compute_detail=detail,
+            )
+            return format_diagnostics_view(report)
+        except Exception as error:  # noqa: BLE001
+            return (
+                "Diagnostics report:\n\n"
+                f"[FAIL] Diagnostics engine error\n"
+                f"  {error}\n\n"
+                "Check logs/soulforge.log for details."
+            )
+
+    def get_config_view(self) -> str:
+        """Resolved configuration view for /config."""
+        try:
+            return format_config_view(self.config)
+        except Exception as error:  # noqa: BLE001
+            return f"Failed to format config: {error}"
 
     def stream_reply(self) -> Iterator[str]:
         """Yield reply tokens, appending the full assistant message at the end."""

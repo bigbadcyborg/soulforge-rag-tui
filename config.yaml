@@ -57,3 +57,7 @@ tasks:
 sessions:
   storePath: ./app/sessions
   maxSavedSessions: 50
+logging:
+  logPath: ./logs/soulforge.log
+  level: info
+  console: false

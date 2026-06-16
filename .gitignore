@@ -22,6 +22,9 @@ chromaDb/
 # Saved conversation sessions (user data)
 app/sessions/*.json
 
+# Application logs
+logs/*.log
+
 # OS/editor junk
 .DS_Store
 Thumbs.db

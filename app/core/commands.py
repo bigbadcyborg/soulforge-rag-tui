@@ -23,6 +23,21 @@ COMMANDS: tuple[CommandHelp, ...] = (
         "Show commands; use /help crystallize for the full skill workflow guide",
     ),
     CommandHelp("General", "/status", "Show model name, active features, and app state"),
+    CommandHelp(
+        "General",
+        "/health",
+        "Short pass/warn/fail summary with top remediation hints",
+    ),
+    CommandHelp(
+        "General",
+        "/diagnostics",
+        "Full system check: models, CUDA, RAG, skills, kanban (TUI modal)",
+    ),
+    CommandHelp(
+        "General",
+        "/config",
+        "Resolved configuration paths, features, and limits (read-only)",
+    ),
     CommandHelp("General", "/exit, /quit", "Exit the application"),
     CommandHelp(
         "Features",
@@ -363,6 +378,28 @@ def format_sessions_help_text() -> str:
     )
 
 
+def format_diagnostics_help_text() -> str:
+    return "\n".join(
+        [
+            "Diagnostics — quick guide",
+            "",
+            "Commands:",
+            "  /health       Short OK / warnings / errors with suggested fixes",
+            "  /diagnostics  Full check list (models, CUDA, RAG, registry, kanban)",
+            "  /config       Resolved paths and feature flags from config.yaml",
+            "",
+            "/status vs /health:",
+            "  /status       Runtime snapshot (model, features, memory turns, RAG chunks)",
+            "  /health       Setup validation before or after model load",
+            "",
+            "Startup:",
+            "  Warnings appear in the welcome message and in logs/soulforge.log",
+            "",
+            "Back to all commands: /help",
+        ]
+    )
+
+
 def format_help_text(topic: str = "", config: AppConfig | None = None) -> str:
     """Format command help for /help or /help <topic>."""
     topic_key = topic.strip().lower()
@@ -370,6 +407,8 @@ def format_help_text(topic: str = "", config: AppConfig | None = None) -> str:
         return format_crystallize_help_text(config)
     if topic_key in ("sessions", "session"):
         return format_sessions_help_text()
+    if topic_key in ("diagnostics", "health", "config"):
+        return format_diagnostics_help_text()
 
     lines = ["Available commands:", ""]
     current_category = ""
