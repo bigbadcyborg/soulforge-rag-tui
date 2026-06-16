@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any
 from rich.text import Text
+from textual import events
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
@@ -59,6 +61,66 @@ class ChatMessage(Static):
         renderable.append(f"{label}\n", style=style)
         renderable.append(self._text or "")
         return renderable
+
+
+class PromptInput(TextArea):
+    """Multiline chat prompt with paste-friendly editing and submit shortcuts."""
+
+    @dataclass
+    class Submitted(Message):
+        """Posted when the user submits the prompt."""
+
+        prompt: PromptInput
+        value: str
+
+        @property
+        def control(self) -> PromptInput:
+            return self.prompt
+
+    def __init__(self, *args, **kwargs) -> None:
+        kwargs.setdefault("show_line_numbers", False)
+        kwargs.setdefault("soft_wrap", True)
+        super().__init__(*args, **kwargs)
+
+    @property
+    def value(self) -> str:
+        return self.text
+
+    @value.setter
+    def value(self, text: str) -> None:
+        self.text = text
+
+    @staticmethod
+    def _key_modifiers(key: str) -> set[str]:
+        parts = key.lower().split("+")
+        if len(parts) <= 1:
+            return set()
+        return set(parts[:-1])
+
+    @staticmethod
+    def _base_key(key: str) -> str:
+        return key.lower().split("+")[-1]
+
+    async def _on_key(self, event: events.Key) -> None:
+        if self.read_only or self.disabled:
+            return
+
+        base_key = self._base_key(event.key)
+        if base_key != "enter":
+            await super()._on_key(event)
+            return
+
+        modifiers = self._key_modifiers(event.key)
+        if modifiers & {"ctrl", "meta"}:
+            await super()._on_key(event)
+            return
+
+        event.stop()
+        event.prevent_default()
+        self._submit()
+
+    def _submit(self) -> None:
+        self.post_message(self.Submitted(self, self.text))
 
 
 class StatusBar(Horizontal):

@@ -13,7 +13,6 @@ from app.utils.guards import format_startup_error
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Input
 
 from app.core.chat_controller import ChatController
 from app.core.commands import format_help_text
@@ -24,6 +23,7 @@ from app.rag.retriever import RetrievedChunk, Retriever
 from app.memory.memory_manager import SECTION_KEYS
 from app.tui.widgets import (
     ChatMessage,
+    PromptInput,
     DiagnosticsModal,
     FeatureToggleModal,
     MemoryEditModal,
@@ -78,7 +78,11 @@ class SoulForgeApp(App):
         with Horizontal(id="app-body"):
             with Vertical(id="chat-column"):
                 yield VerticalScroll(id="chat-view")
-                yield Input(placeholder="Loading model...", id="prompt", disabled=True)
+                yield PromptInput(
+                    placeholder="Loading model...",
+                    id="prompt",
+                    disabled=True,
+                )
             yield TutorialWizardPanel()
         yield StatusBar()
 
@@ -87,8 +91,8 @@ class SoulForgeApp(App):
         return self.query_one("#chat-view", VerticalScroll)
 
     @property
-    def prompt(self) -> Input:
-        return self.query_one("#prompt", Input)
+    def prompt(self) -> PromptInput:
+        return self.query_one("#prompt", PromptInput)
 
     @property
     def status_bar(self) -> StatusBar:
@@ -1162,7 +1166,7 @@ class SoulForgeApp(App):
 
     # --- input handling ------------------------------------------------------
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
+    def on_prompt_input_submitted(self, event: PromptInput.Submitted) -> None:
         text = event.value.strip()
         self.prompt.value = ""
         if not text:

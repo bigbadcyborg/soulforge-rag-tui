@@ -41,7 +41,9 @@ ChatMessage.role-system {
 
 #prompt {
     dock: bottom;
-    height: 3;
+    height: 6;
+    max-height: 40%;
+    min-height: 3;
     margin: 0 1 1 1;
 }
 
