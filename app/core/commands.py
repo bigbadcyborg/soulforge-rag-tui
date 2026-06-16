@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.core.config import AppConfig
 
 
 @dataclass(frozen=True)
@@ -13,7 +17,11 @@ class CommandHelp:
 
 
 COMMANDS: tuple[CommandHelp, ...] = (
-    CommandHelp("General", "/help", "Show available commands and what each does"),
+    CommandHelp(
+        "General",
+        "/help [topic]",
+        "Show commands; use /help crystallize for the full skill workflow guide",
+    ),
     CommandHelp("General", "/status", "Show model name, active features, and app state"),
     CommandHelp("General", "/exit, /quit", "Exit the application"),
     CommandHelp(
@@ -97,13 +105,147 @@ COMMANDS: tuple[CommandHelp, ...] = (
     CommandHelp(
         "Skills",
         "/skills",
-        "Open the skill viewer menu (TUI); browse, create, or archive skills",
+        "Browse active skills, create manually, or archive (TUI modal)",
+    ),
+    CommandHelp(
+        "Skills",
+        "/success [note]",
+        "Mark the recent chat workflow as successful (counts toward crystallization)",
+    ),
+    CommandHelp(
+        "Skills",
+        "/crystallize [fingerprint]",
+        "Draft a reusable skill from a workflow that reached the success threshold",
+    ),
+    CommandHelp(
+        "Skills",
+        "/skill-accept",
+        "Save the pending skill draft to app/skills/active/ (requires skills on)",
+    ),
+    CommandHelp(
+        "Skills",
+        "/skill-reject",
+        "Discard the pending skill draft without saving",
     ),
 )
 
 
-def format_help_text() -> str:
-    """Format the full command list for /help."""
+def _skill_settings(config: AppConfig | None) -> tuple[int, int, bool]:
+    if config is None:
+        return 3, 3, False
+    skills = config.skills
+    return (
+        skills.min_successful_repeats,
+        skills.success_window_turns,
+        skills.auto_create,
+    )
+
+
+def _skill_crystallization_summary(config: AppConfig | None = None) -> str:
+    min_repeats, window_turns, auto_create = _skill_settings(config)
+    auto_line = (
+        "At threshold, a review modal opens automatically after /success."
+        if auto_create
+        else "At threshold, run /crystallize to open the review modal."
+    )
+    return (
+        "Skill crystallization (quick guide):\n"
+        "  Turn a repeated successful chat workflow into a reusable skill file.\n"
+        "  1. Enable skills: /features skills on\n"
+        "  2. Chat through a workflow (similar user messages each time)\n"
+        f"  3. After each bot reply, run /success [optional note] "
+        f"({min_repeats} times total; once per turn)\n"
+        f"  4. {auto_line}\n"
+        "  5. Review Trigger / Procedure / Validation, then Accept or Edit\n"
+        "  6. Saved skills live in app/skills/active/ and inject when skills are on\n"
+        f"  Fingerprint uses your last {window_turns} user messages. "
+        "For the full walkthrough: /help crystallize"
+    )
+
+
+def format_crystallize_help_text(config: AppConfig | None = None) -> str:
+    """Detailed help for /crystallize and the full skill crystallization workflow."""
+    min_repeats, window_turns, auto_create = _skill_settings(config)
+    auto_detail = (
+        "When autoCreate is true in config.yaml, the app runs the crystallizer "
+        "and opens the review modal automatically on the threshold /success."
+        if auto_create
+        else "When autoCreate is false (default), the threshold /success only "
+        "reminds you to run /crystallize — nothing is drafted until you do."
+    )
+    return "\n".join(
+        [
+            "Skill crystallization — full guide",
+            "",
+            "What it does:",
+            "  Repeatedly marking the same workflow as successful lets SoulForge",
+            "  suggest a reusable skill (Trigger, Procedure, Validation) from your",
+            "  chat. Nothing is saved until you Accept or run /skill-accept.",
+            "",
+            "Prerequisites:",
+            "  • /features skills on  — required to save; marking /success works either way",
+            "  • A repeatable workflow in chat (same kind of steps each time)",
+            "",
+            "Settings (config.yaml → skills:):",
+            f"  • minSuccessfulRepeats: {min_repeats}  — /success marks needed before crystallize",
+            f"  • successWindowTurns: {window_turns}  — user messages used for fingerprinting",
+            f"  • autoCreate: {str(auto_create).lower()}  — {auto_detail}",
+            "  • workflowLogPath — tracks counts in app/skills/workflow_log.json",
+            "",
+            "Step-by-step:",
+            "  1. Chat normally. Example workflow:",
+            "       You: I need to rebuild llama-cpp-python with CUDA in WSL",
+            "       Bot:  (reply)",
+            "       You: activate venv, export CUDA paths, build with GGML_CUDA",
+            "       Bot:  (reply)",
+            "",
+            f"  2. Run /success [note] after a bot reply — e.g. /success rebuild cuda",
+            "     Optional note becomes a hint for the skill name and summary.",
+            "",
+            "  3. Repeat similar chat + /success until the counter reaches "
+            f"{min_repeats}/{min_repeats}.",
+            "     • Each /success counts once per turn (same turn twice does not double-count).",
+            "     • Use similar user phrasing so the fingerprint matches.",
+            f"     • Only your last {window_turns} user messages are fingerprinted.",
+            "",
+            f"  4. When count reaches {min_repeats}:",
+            "     • autoCreate true  → review modal opens after /success",
+            "     • autoCreate false → system says to run /crystallize",
+            "",
+            "  5. /crystallize [fingerprint]",
+            "     Drafts skill markdown from the logged workflow (LLM + validation).",
+            "     Omit fingerprint to use the best eligible workflow from the log.",
+            "",
+            "  6. Review modal (TUI) or printed draft (CLI):",
+            "     • Accept      — save to app/skills/active/<name>.md",
+            "     • Edit        — change markdown, then save",
+            "     • Reject      — discard draft (/skill-reject)",
+            "",
+            "  7. Verify: /skills lists the new skill; registry.json and workflow_log.json update.",
+            "",
+            "Related commands:",
+            "  /success [note]     Mark workflow success (increments counter)",
+            "  /crystallize        Draft pending skill from threshold workflow",
+            "  /skill-accept       Save pending draft without modal",
+            "  /skill-reject       Discard pending draft",
+            "  /skills             Browse, create, or archive skills",
+            "",
+            "Tips:",
+            "  • Lower minSuccessfulRepeats temporarily (e.g. 2) for faster testing.",
+            "  • After Accept, the same workflow will not suggest again (crystallized_as in log).",
+            "  • Saving requires skills on; enable before Accept if you marked success earlier.",
+            "",
+            "Back to all commands: /help",
+        ]
+    )
+
+
+def format_help_text(topic: str = "", config: AppConfig | None = None) -> str:
+    """Format command help for /help or /help <topic>."""
+    topic_key = topic.strip().lower()
+    if topic_key in ("crystallize", "crystallization", "skills"):
+        return format_crystallize_help_text(config)
+
     lines = ["Available commands:", ""]
     current_category = ""
     for cmd in COMMANDS:
@@ -113,5 +255,8 @@ def format_help_text() -> str:
         lines.append(f"  {cmd.usage}")
         lines.append(f"    {cmd.description}")
         lines.append("")
+
+    lines.append(_skill_crystallization_summary(config))
+    lines.append("")
     lines.append("Type anything else to chat.")
     return "\n".join(lines).rstrip()

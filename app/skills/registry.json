@@ -1,0 +1,10 @@
+{
+  "curl": {
+    "name": "curl",
+    "description": "curls a website",
+    "tags": [],
+    "status": "archived",
+    "success_count": 0,
+    "last_used": ""
+  }
+}

@@ -18,7 +18,7 @@ features:
   soul: true
   rag: false
   memory: true
-  skills: false
+  skills: true
   curator: false
   kanban: false
   streaming: true
@@ -45,7 +45,9 @@ skills:
   activePath: ./app/skills/active
   archivedPath: ./app/skills/archived
   registryPath: ./app/skills/registry.json
+  workflowLogPath: ./app/skills/workflow_log.json
   autoCreate: false
   minSuccessfulRepeats: 3
+  successWindowTurns: 3
 tasks:
   kanbanPath: ./app/tasks/kanban.json

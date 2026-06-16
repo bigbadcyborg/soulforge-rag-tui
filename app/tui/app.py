@@ -32,6 +32,8 @@ from app.tui.widgets import (
     SkillViewerModal,
     SkillDetailModal,
     SkillCreateModal,
+    SkillCrystallizeModal,
+    SkillCrystallizeEditModal,
 )
 
 
@@ -505,8 +507,85 @@ class SoulForgeApp(App):
 
     def _handle_skills_command(self) -> None:
         active_skills = self.controller.skill_manager.list_skills(status="active")
-        modal = SkillViewerModal(active_skills)
+        pending_message = ""
+        if self.controller.pending_skill_suggestion is not None:
+            name = self.controller.pending_skill_suggestion.name
+            pending_message = f"Suggested skill pending: {name} (run /crystallize or /skill-accept)"
+        modal = SkillViewerModal(active_skills, pending_message)
         self.app.push_screen(modal, self._handle_skills_modal_result)
+
+    def _open_skill_crystallize_modal(self) -> None:
+        suggestion = self.controller.pending_skill_suggestion
+        if suggestion is None:
+            self._write_message("system", "No pending skill suggestion.")
+            return
+        modal = SkillCrystallizeModal(suggestion)
+        self.app.push_screen(modal, self._handle_skill_crystallize_result)
+
+    def _handle_skill_crystallize_result(self, action: str | None) -> None:
+        if action is None:
+            return
+        if action == "reject":
+            self.controller.reject_skill_suggestion()
+            self._write_message("system", "Skill suggestion rejected.")
+            return
+        if action == "accept":
+            self._accept_pending_skill_suggestion()
+            return
+        if action == "edit":
+            suggestion = self.controller.pending_skill_suggestion
+            if suggestion is None:
+                return
+            modal = SkillCrystallizeEditModal(suggestion)
+            self.app.push_screen(modal, self._handle_skill_crystallize_edit_result)
+
+    def _handle_skill_crystallize_edit_result(self, content: str | None) -> None:
+        if content is None:
+            self._write_message("system", "Skill edit cancelled. Suggestion still pending.")
+            return
+        self._accept_pending_skill_suggestion(content)
+
+    def _accept_pending_skill_suggestion(self, content: str | None = None) -> None:
+        name = (
+            self.controller.pending_skill_suggestion.name
+            if self.controller.pending_skill_suggestion is not None
+            else "skill"
+        )
+        try:
+            self.controller.accept_skill_suggestion(content)
+        except ValueError as error:
+            self._write_message("system", str(error))
+            return
+        self._write_message("system", f"Skill '{name}' saved.")
+        self._refresh_features()
+
+    def _handle_success_command(self, args: str) -> None:
+        result = self.controller.mark_workflow_success(args.strip())
+        if result.message:
+            self._write_message("system", result.message)
+        if result.should_open_modal and self.controller.pending_skill_suggestion is not None:
+            self._open_skill_crystallize_modal()
+
+    def _handle_crystallize_command(self, args: str) -> None:
+        fingerprint = args.strip() or None
+        result = self.controller.crystallize_workflow(fingerprint)
+        if result.message:
+            self._write_message("system", result.message)
+        if result.has_suggestion and self.controller.pending_skill_suggestion is not None:
+            self._open_skill_crystallize_modal()
+
+    def _handle_skill_accept_command(self) -> None:
+        if self.controller.pending_skill_suggestion is None:
+            self._write_message("system", "No pending skill suggestion.")
+            return
+        self._accept_pending_skill_suggestion()
+
+    def _handle_skill_reject_command(self) -> None:
+        if self.controller.pending_skill_suggestion is None:
+            self._write_message("system", "No pending skill suggestion.")
+            return
+        self.controller.reject_skill_suggestion()
+        self._write_message("system", "Skill suggestion rejected.")
 
     def _handle_skills_modal_result(self, result: Any) -> None:
         if result == "new":
@@ -573,7 +652,9 @@ class SoulForgeApp(App):
         if command in ("/exit", "/quit"):
             self.exit()
         elif command == "/help":
-            help_text = format_help_text() + "\n\nCtrl+Q also quits."
+            help_text = format_help_text(args, self.controller.config)
+            if not args.strip():
+                help_text += "\n\nCtrl+Q also quits."
             self._write_message("system", help_text)
         elif command == "/status":
             self._write_message("system", self._status_text())
@@ -607,6 +688,14 @@ class SoulForgeApp(App):
             self._handle_memory_reject_command()
         elif command == "/skills":
             self._handle_skills_command()
+        elif command == "/success":
+            self._handle_success_command(args)
+        elif command == "/crystallize":
+            self._handle_crystallize_command(args)
+        elif command == "/skill-accept":
+            self._handle_skill_accept_command()
+        elif command == "/skill-reject":
+            self._handle_skill_reject_command()
         else:
             self._write_message(
                 "system", f"Unknown command: {command}. Type /help."

@@ -1,0 +1,15 @@
+{
+  "workflows": {
+    "7cc3ea79e409": {
+      "fingerprint": "7cc3ea79e409",
+      "summary": "I need to rebuild llama-cpp-python with CUDA in WSL",
+      "success_count": 1,
+      "last_marked": "2026-06-12T00:15:04+00:00",
+      "user_statements": [
+        "I need to rebuild llama-cpp-python with CUDA in WSL",
+        "activate venv, export CUDA paths, build with GGML_CUDA"
+      ],
+      "crystallized_as": ""
+    }
+  }
+}

@@ -200,6 +200,66 @@ def _handle_memory_reject_cli(controller: ChatController) -> None:
     print("Memory suggestion rejected.")
 
 
+def _handle_success_cli(controller: ChatController, args: str) -> None:
+    result = controller.mark_workflow_success(args.strip())
+    if result.message:
+        print(result.message)
+    if result.should_open_modal and controller.pending_skill_suggestion is not None:
+        print(controller.get_skill_review())
+        print("Run /skill-accept or /skill-reject.")
+
+
+def _handle_crystallize_cli(controller: ChatController, args: str) -> None:
+    fingerprint = args.strip() or None
+    result = controller.crystallize_workflow(fingerprint)
+    if result.message:
+        print(result.message)
+    if result.has_suggestion and controller.pending_skill_suggestion is not None:
+        print()
+        print(controller.get_skill_review())
+        print("Run /skill-accept or /skill-reject.")
+
+
+def _handle_skill_accept_cli(controller: ChatController) -> None:
+    if controller.pending_skill_suggestion is None:
+        print("No pending skill suggestion.")
+        return
+    try:
+        controller.accept_skill_suggestion()
+    except ValueError as error:
+        print(error)
+        return
+    print("Skill suggestion saved.")
+
+
+def _handle_skill_reject_cli(controller: ChatController) -> None:
+    if controller.pending_skill_suggestion is None:
+        print("No pending skill suggestion.")
+        return
+    controller.reject_skill_suggestion()
+    print("Skill suggestion rejected.")
+
+
+def _handle_skills_cli(controller: ChatController) -> None:
+    active = controller.skill_manager.list_skills(status="active")
+    archived = controller.skill_manager.list_skills(status="archived")
+    print("Active skills:")
+    if not active:
+        print("  (none)")
+    for skill in active:
+        print(f"  - {skill.get('name')}: {skill.get('description', '')}")
+    print("Archived skills:")
+    if not archived:
+        print("  (none)")
+    for skill in archived:
+        print(f"  - {skill.get('name')}: {skill.get('description', '')}")
+    if controller.pending_skill_suggestion is not None:
+        print(
+            f"\nPending suggestion: {controller.pending_skill_suggestion.name} "
+            "(run /skill-accept or /skill-reject)"
+        )
+
+
 def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
     """Handle CLI commands. Return True if should continue, False if should exit."""
     parts = cmd.split(maxsplit=1)
@@ -209,7 +269,7 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
     if command in ("/exit", "/quit", "exit", "quit"):
         return False
     elif command == "/help":
-        print(format_help_text())
+        print(format_help_text(args, controller.config))
     elif command == "/status":
         backend = controller.compute_backend
         print(f"Model: {controller.model_name}")
@@ -218,6 +278,10 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
         print(
             f"Memory turns: {controller.turn_count} "
             f"(review every {controller.config.memory.update_every_turns})"
+        )
+        print(
+            f"Skill crystallization threshold: "
+            f"{controller.config.skills.min_successful_repeats} successes"
         )
     elif command == "/features":
         _handle_features_cli(controller, args)
@@ -246,6 +310,16 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
         _handle_memory_accept_cli(controller)
     elif command == "/memory-reject":
         _handle_memory_reject_cli(controller)
+    elif command == "/skills":
+        _handle_skills_cli(controller)
+    elif command == "/success":
+        _handle_success_cli(controller, args)
+    elif command == "/crystallize":
+        _handle_crystallize_cli(controller, args)
+    elif command == "/skill-accept":
+        _handle_skill_accept_cli(controller)
+    elif command == "/skill-reject":
+        _handle_skill_reject_cli(controller)
     else:
         print(f"Unknown command: {command}. Type /help for available commands.")
 

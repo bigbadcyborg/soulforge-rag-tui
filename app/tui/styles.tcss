@@ -259,7 +259,8 @@ MemoryReviewModal {
 }
 
 /* Skill System Modals */
-#skill-viewer-container, #skill-detail-container, #skill-create-container {
+#skill-viewer-container, #skill-detail-container, #skill-create-container,
+#skill-crystallize-container, #skill-crystallize-edit-container {
     width: 80;
     height: 32;
     background: $surface;
@@ -268,11 +269,22 @@ MemoryReviewModal {
     align: center middle;
 }
 
-#skill-list-scroll, #skill-content-scroll {
+#skill-list-scroll, #skill-content-scroll, #skill-crystallize-scroll {
     height: 1fr;
     margin-bottom: 1;
     border: solid $panel;
     padding: 0 1;
+}
+
+#skill-crystallize-content {
+    width: 100%;
+    color: $text-muted;
+}
+
+#skill-crystallize-edit-container TextArea {
+    height: 1fr;
+    margin-bottom: 1;
+    border: solid $panel;
 }
 
 .skill-list-item {

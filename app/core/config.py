@@ -140,8 +140,26 @@ class SkillsConfig:
     active_path: str = "./app/skills/active"
     archived_path: str = "./app/skills/archived"
     registry_path: str = "./app/skills/registry.json"
+    workflow_log_path: str = "./app/skills/workflow_log.json"
     auto_create: bool = False
     min_successful_repeats: int = 3
+    success_window_turns: int = 3
+
+    @property
+    def active_dir(self) -> Path:
+        return resolve_path(self.active_path)
+
+    @property
+    def archived_dir(self) -> Path:
+        return resolve_path(self.archived_path)
+
+    @property
+    def registry_file(self) -> Path:
+        return resolve_path(self.registry_path)
+
+    @property
+    def workflow_log_file(self) -> Path:
+        return resolve_path(self.workflow_log_path)
 
 
 @dataclass
@@ -243,8 +261,12 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         active_path=skills_section.get("activePath", "./app/skills/active"),
         archived_path=skills_section.get("archivedPath", "./app/skills/archived"),
         registry_path=skills_section.get("registryPath", "./app/skills/registry.json"),
+        workflow_log_path=skills_section.get(
+            "workflowLogPath", "./app/skills/workflow_log.json"
+        ),
         auto_create=skills_section.get("autoCreate", False),
         min_successful_repeats=skills_section.get("minSuccessfulRepeats", 3),
+        success_window_turns=skills_section.get("successWindowTurns", 3),
     )
 
     tasks_section = _section(data, "tasks")

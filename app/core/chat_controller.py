@@ -7,6 +7,7 @@ logic UI-agnostic means the same code path powers every front end.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Callable, Iterator
 
@@ -24,7 +25,14 @@ from app.memory.memory_reviewer import (
 )
 from app.rag.ingest import IngestResult, ingest_documents
 from app.rag.retriever import Retriever, RetrievedChunk, get_store_stats
+from app.skills.skill_crystallizer import (
+    SkillSuggestion,
+    format_suggestion_view as format_skill_suggestion_view,
+    generate_suggestion as generate_skill_suggestion,
+    resolve_unique_name,
+)
 from app.skills.skill_manager import SkillManager
+from app.skills.workflow_observer import WorkflowMarkResult, WorkflowObserver
 
 SOUL_PATH = PROJECT_ROOT / "SOUL.md"
 
@@ -33,6 +41,20 @@ SOUL_PATH = PROJECT_ROOT / "SOUL.md"
 class TurnReviewResult:
     turn_count: int
     review_due: bool
+    has_suggestion: bool
+    message: str = ""
+
+
+@dataclass
+class SkillMarkResult:
+    mark: WorkflowMarkResult
+    has_suggestion: bool
+    should_open_modal: bool
+    message: str = ""
+
+
+@dataclass
+class SkillCrystallizeResult:
     has_suggestion: bool
     message: str = ""
 
@@ -53,10 +75,13 @@ class ChatController:
         self.prompt_builder = PromptBuilder(config)
         self.memory_manager = MemoryManager(config)
         self.skill_manager = SkillManager(config)
+        self.workflow_observer = WorkflowObserver(config)
         self.features = FeatureStateManager(config, on_change=self._on_feature_change)
 
         self.turn_count: int = 0
         self.pending_suggestion: MemorySuggestion | None = None
+        self.pending_skill_suggestion: SkillSuggestion | None = None
+        self._pending_crystallize_fingerprint: str = ""
 
         # RAG is initialized lazily to avoid loading embedding model at startup
         self._retriever: Retriever | None = None
@@ -263,6 +288,152 @@ class ChatController:
     def reject_memory_suggestion(self) -> None:
         """Discard the pending memory suggestion without saving."""
         self.pending_suggestion = None
+
+    def mark_workflow_success(self, note: str = "") -> SkillMarkResult:
+        """Record a successful workflow from recent chat messages."""
+        mark = self.workflow_observer.mark_success(
+            self.messages,
+            note=note,
+            turn_count=self.turn_count,
+        )
+        if mark.already_crystallized:
+            return SkillMarkResult(
+                mark=mark,
+                has_suggestion=False,
+                should_open_modal=False,
+                message=mark.message,
+            )
+
+        should_open_modal = False
+        has_suggestion = self.pending_skill_suggestion is not None
+
+        if mark.threshold_reached:
+            self._pending_crystallize_fingerprint = mark.fingerprint
+            if self.config.skills.auto_create:
+                result = self.crystallize_workflow(mark.fingerprint)
+                return SkillMarkResult(
+                    mark=mark,
+                    has_suggestion=result.has_suggestion,
+                    should_open_modal=result.has_suggestion,
+                    message=result.message or mark.message,
+                )
+            message = f"{mark.message} Run /crystallize to draft a skill."
+            return SkillMarkResult(
+                mark=mark,
+                has_suggestion=False,
+                should_open_modal=False,
+                message=message,
+            )
+
+        return SkillMarkResult(
+            mark=mark,
+            has_suggestion=has_suggestion,
+            should_open_modal=should_open_modal,
+            message=mark.message,
+        )
+
+    def crystallize_workflow(
+        self,
+        fingerprint: str | None = None,
+    ) -> SkillCrystallizeResult:
+        """Generate a skill suggestion from a logged workflow."""
+        target_fp = fingerprint or self._pending_crystallize_fingerprint
+        workflow = self.workflow_observer.get_best_workflow_for_crystallize(target_fp)
+        if workflow is None:
+            return SkillCrystallizeResult(
+                has_suggestion=False,
+                message=(
+                    "No workflow ready for crystallization. "
+                    f"Mark success {self.config.skills.min_successful_repeats} times "
+                    "with /success first."
+                ),
+            )
+
+        if self.pending_skill_suggestion is not None:
+            return SkillCrystallizeResult(
+                has_suggestion=True,
+                message="Skill suggestion already pending. Run /skill-accept or /skill-reject.",
+            )
+
+        existing_names = self.skill_manager.list_skill_names()
+        suggestion, error = generate_skill_suggestion(
+            self.runtime,
+            self.config,
+            self.messages,
+            workflow,
+            existing_names,
+        )
+        if error and suggestion is None:
+            return SkillCrystallizeResult(
+                has_suggestion=False,
+                message=f"Skill crystallization failed: {error}",
+            )
+
+        if suggestion is None:
+            return SkillCrystallizeResult(
+                has_suggestion=False,
+                message="Skill crystallization produced no suggestion.",
+            )
+
+        unique_name = resolve_unique_name(suggestion.name, set(existing_names))
+        if unique_name != suggestion.name:
+            suggestion.name = unique_name
+            suggestion.proposed_content = re.sub(
+                r"^name: .+$",
+                f"name: {unique_name}",
+                suggestion.proposed_content,
+                count=1,
+                flags=re.MULTILINE,
+            )
+
+        self.pending_skill_suggestion = suggestion
+        self._pending_crystallize_fingerprint = workflow.fingerprint
+        return SkillCrystallizeResult(
+            has_suggestion=True,
+            message=f"Skill suggestion ready for '{suggestion.name}'.",
+        )
+
+    def get_skill_review(self) -> str:
+        if self.pending_skill_suggestion is None:
+            return "No pending skill suggestion."
+        return format_skill_suggestion_view(self.pending_skill_suggestion)
+
+    def accept_skill_suggestion(self, content: str | None = None) -> bool:
+        """Save pending skill suggestion. Requires skills feature enabled."""
+        if self.pending_skill_suggestion is None:
+            raise ValueError("No pending skill suggestion.")
+        if not self.features.is_enabled("skills"):
+            raise ValueError(
+                "Skills feature is disabled. Run /features skills on before accepting."
+            )
+
+        suggestion = self.pending_skill_suggestion
+        text = content if content is not None else suggestion.proposed_content
+        saved = self.skill_manager.create_skill_from_suggestion(
+            suggestion.name,
+            suggestion.description,
+            text,
+            success_count=suggestion.success_count,
+        )
+        if not saved:
+            raise ValueError(
+                f"Could not save skill '{suggestion.name}' (it may already exist)."
+            )
+
+        if suggestion.fingerprint:
+            self.workflow_observer.mark_crystallized(
+                suggestion.fingerprint,
+                suggestion.name,
+            )
+
+        self.pending_skill_suggestion = None
+        self._pending_crystallize_fingerprint = ""
+        self._rebuild_system_prompt()
+        return True
+
+    def reject_skill_suggestion(self) -> None:
+        """Discard pending skill suggestion without saving."""
+        self.pending_skill_suggestion = None
 
     def add_user_turn(self, user_input: str) -> list[RetrievedChunk]:
         """Retrieve context, append the user message, and return any sources."""

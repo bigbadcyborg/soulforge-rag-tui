@@ -13,6 +13,7 @@ from app.core.compute_backend import ComputeBackend, UNKNOWN
 from app.core.feature_state import FEATURE_KEYS
 from app.memory.memory_manager import SECTION_FILENAMES
 from app.memory.memory_reviewer import MemorySuggestion
+from app.skills.skill_crystallizer import SkillSuggestion
 from app.rag.retriever import RetrievedChunk, Retriever
 
 ROLE_LABELS = {
@@ -344,16 +345,84 @@ class MemoryReviewModal(ModalScreen):
             self.dismiss("reject")
 
 
+class SkillCrystallizeModal(ModalScreen):
+    """Modal for reviewing and approving a pending skill crystallization."""
+
+    def __init__(self, suggestion: SkillSuggestion) -> None:
+        super().__init__()
+        self.suggestion = suggestion
+
+    def compose(self):
+        count = len(self.suggestion.proposed_content)
+        preview = (
+            f"Rationale:\n{self.suggestion.rationale}\n\n"
+            f"Proposed {self.suggestion.name}.md ({count} chars):\n"
+            f"{self.suggestion.proposed_content or '(empty)'}"
+        )
+        with Vertical(id="skill-crystallize-container"):
+            yield Label(
+                f"Skill crystallization ({self.suggestion.success_count} successes):"
+            )
+            with VerticalScroll(id="skill-crystallize-scroll"):
+                yield Static(preview, id="skill-crystallize-content")
+            with Container(id="button-container"):
+                yield Button("Accept", id="accept-button", variant="primary")
+                yield Button("Edit", id="edit-button")
+                yield Button("Reject", id="reject-button")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "accept-button":
+            self.dismiss("accept")
+        elif event.button.id == "edit-button":
+            self.dismiss("edit")
+        elif event.button.id == "reject-button":
+            self.dismiss("reject")
+
+
+class SkillCrystallizeEditModal(ModalScreen):
+    """Edit a pending skill suggestion before saving."""
+
+    def __init__(self, suggestion: SkillSuggestion) -> None:
+        super().__init__()
+        self.suggestion = suggestion
+
+    def compose(self):
+        with Vertical(id="skill-crystallize-edit-container"):
+            yield Label(f"Edit skill: {self.suggestion.name}")
+            yield Label("Full markdown content:")
+            yield TextArea(
+                self.suggestion.proposed_content,
+                id="skill-crystallize-textarea",
+            )
+            with Container(id="button-container"):
+                yield Button("Save", id="save-button", variant="primary")
+                yield Button("Cancel", id="cancel-button")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "cancel-button":
+            self.dismiss(None)
+        elif event.button.id == "save-button":
+            text = self.query_one("#skill-crystallize-textarea", TextArea).text
+            self.dismiss(text.strip())
+
+
 class SkillViewerModal(ModalScreen):
     """Modal for listing and viewing skills."""
 
-    def __init__(self, skills: list[dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        skills: list[dict[str, Any]],
+        pending_message: str = "",
+    ) -> None:
         super().__init__()
         self.skills = skills
+        self.pending_message = pending_message
 
     def compose(self):
         with Vertical(id="skill-viewer-container"):
             yield Label("Active Skills:")
+            if self.pending_message:
+                yield Label(self.pending_message, classes="dim")
             with VerticalScroll(id="skill-list-scroll"):
                 if not self.skills:
                     yield Label("(no active skills)", classes="dim")
