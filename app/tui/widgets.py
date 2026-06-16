@@ -19,6 +19,7 @@ from app.tasks.task_manager import COLUMN_LABELS, COLUMNS, Task
 from app.tasks.task_suggester import TaskSuggestion, format_suggestion_view
 from app.sessions.session_manager import SessionMeta
 from app.rag.retriever import RetrievedChunk, Retriever
+from app.tools.models import PendingToolCall
 
 ROLE_LABELS = {
     "user": "You",
@@ -185,6 +186,7 @@ FEATURE_TOGGLE_LABELS: dict[str, str] = {
     "skills": "Skills",
     "curator": "Curator",
     "kanban": "Kanban",
+    "tools": "Tools",
     "show_sources": "Show sources",
     "streaming": "Streaming",
 }
@@ -196,6 +198,7 @@ FEATURE_TOGGLE_DESCRIPTIONS: dict[str, str] = {
     "skills": "Inject reusable workflow skills into prompts. (coming soon)",
     "curator": "Review and maintain skills and memory quality. (coming soon)",
     "kanban": "Track tasks on a local Kanban board with /tasks and /task-suggest.",
+    "tools": "Let the assistant propose local file, shell, and action tools (approval required for risky ops).",
     "show_sources": "List retrieved document sources after each reply.",
     "streaming": "Stream model tokens into the chat as they are generated.",
 }
@@ -739,6 +742,198 @@ class TaskSuggestionModal(ModalScreen):
             self.dismiss(("approve", self.suggestion.suggestion_id))
         elif event.button.id == "ignore-button":
             self.dismiss(("ignore", self.suggestion.suggestion_id))
+
+
+class ToolCallModal(ModalScreen):
+    """Modal for reviewing and approving pending tool calls."""
+
+    def __init__(
+        self,
+        pending: PendingToolCall,
+        preview: str,
+        index: int,
+        total: int,
+    ) -> None:
+        super().__init__()
+        self.pending = pending
+        self.preview = preview
+        self.index = index
+        self.total = total
+
+    def compose(self):
+        with Vertical(id="tool-call-container"):
+            yield Label(
+                f"Tool call ({self.index + 1}/{self.total}) — "
+                f"{self.pending.call.name} [{self.pending.risk.value}]"
+            )
+            with VerticalScroll(id="tool-call-scroll"):
+                yield Static(self.preview, id="tool-call-content")
+            with Container(id="button-container"):
+                yield Button("Approve", id="approve-button", variant="primary")
+                yield Button("Reject", id="reject-button")
+                yield Button("Close", id="close-button")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "close-button":
+            self.dismiss(None)
+        elif event.button.id == "approve-button":
+            self.dismiss(("approve", self.pending.call_id))
+        elif event.button.id == "reject-button":
+            self.dismiss(("reject", self.pending.call_id))
+
+
+class ToolsMenuModal(ModalScreen):
+    """Main tools workshop: status, allowlist management, and actions."""
+
+    def __init__(self, menu_data: dict) -> None:
+        super().__init__()
+        self.menu_data = menu_data
+
+    def compose(self):
+        header = "Tools Workshop"
+        if self.menu_data.get("pending_count"):
+            header += f" ({self.menu_data['pending_count']} pending)"
+        with Vertical(id="tools-menu-container"):
+            yield Label(header)
+            with VerticalScroll(id="tools-menu-scroll"):
+                yield Static(self.menu_data.get("catalog", ""), id="tools-menu-catalog")
+                allowlist = self.menu_data.get("allowlist") or []
+                if allowlist:
+                    yield Label("Shell allowlist:")
+                    for entry in allowlist:
+                        safe_id = entry.replace(" ", "_").replace("/", "_")[:40]
+                        with Horizontal(classes="allowlist-row"):
+                            yield Static(f"  {entry}", classes="allowlist-entry")
+                            yield Button(
+                                "Remove",
+                                id=f"remove_{safe_id}",
+                                classes="allowlist-remove",
+                            )
+            with Container(id="button-container"):
+                yield Button("Test Tool", id="test-tool-button", variant="primary")
+                if self.menu_data.get("allow_shell"):
+                    yield Button("Add Shell Command", id="add-shell-button")
+                yield Button("View Log", id="view-log-button")
+                yield Button("Close", id="close-button")
+
+    def on_mount(self) -> None:
+        self._allowlist_button_ids = {}
+        for entry in self.menu_data.get("allowlist") or []:
+            safe_id = entry.replace(" ", "_").replace("/", "_")[:40]
+            self._allowlist_button_ids[f"remove_{safe_id}"] = entry
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        bid = event.button.id or ""
+        if bid == "close-button":
+            self.dismiss(None)
+        elif bid == "test-tool-button":
+            self.dismiss("test")
+        elif bid == "add-shell-button":
+            self.dismiss("add_shell")
+        elif bid == "view-log-button":
+            self.dismiss("log")
+        elif bid.startswith("remove_"):
+            command = self._allowlist_button_ids.get(bid, "")
+            if command:
+                self.dismiss(("remove", command))
+
+
+class ToolTestModal(ModalScreen):
+    """Pick a tool, provide JSON args, run a manual test."""
+
+    def __init__(
+        self,
+        tool_defs: list[dict],
+        run_test,
+    ) -> None:
+        super().__init__()
+        self.tool_defs = tool_defs
+        self.run_test = run_test
+        self.selected_tool = tool_defs[0]["name"] if tool_defs else ""
+
+    def compose(self):
+        with Vertical(id="tool-test-container"):
+            yield Label("Test Tool")
+            with VerticalScroll(id="tool-test-body"):
+                yield Label("Select tool:")
+                with VerticalScroll(id="tool-test-picker"):
+                    for tool_def in self.tool_defs:
+                        name = tool_def["name"]
+                        flag = "ok" if tool_def.get("available") else "off"
+                        yield Button(
+                            f"{name} [{tool_def.get('risk', '?')}] ({flag})",
+                            id=f"pick_{name}",
+                            classes="tool-pick-btn",
+                        )
+                yield Label("Args (JSON):")
+                example = "{}"
+                if self.tool_defs:
+                    example = self.tool_defs[0].get("example_args", "{}")
+                yield TextArea(example, id="tool-test-args")
+                yield Label("", id="tool-test-result-label")
+                with VerticalScroll(id="tool-test-result-scroll"):
+                    yield Static("(run a test to see output)", id="tool-test-result")
+            with Container(id="button-container"):
+                yield Button("Run Test", id="run-test-button", variant="primary")
+                yield Button("Close", id="close-button")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        bid = event.button.id or ""
+        if bid == "close-button":
+            self.dismiss(None)
+        elif bid.startswith("pick_"):
+            self.selected_tool = bid.replace("pick_", "", 1)
+            for tool_def in self.tool_defs:
+                if tool_def["name"] == self.selected_tool:
+                    self.query_one("#tool-test-args", TextArea).text = tool_def.get(
+                        "example_args", "{}"
+                    )
+                    break
+        elif bid == "run-test-button":
+            import json
+
+            raw = self.query_one("#tool-test-args", TextArea).text.strip()
+            try:
+                args = json.loads(raw) if raw else {}
+            except json.JSONDecodeError as error:
+                self.query_one("#tool-test-result", Static).update(
+                    f"Invalid JSON: {error}"
+                )
+                return
+            if not isinstance(args, dict):
+                self.query_one("#tool-test-result", Static).update(
+                    "Args must be a JSON object."
+                )
+                return
+            if not self.selected_tool:
+                self.query_one("#tool-test-result", Static).update("Select a tool first.")
+                return
+            success, text = self.run_test(self.selected_tool, args)
+            label = "OK" if success else "FAILED"
+            self.query_one("#tool-test-result-label", Label).update(
+                f"Result: {label}"
+            )
+            self.query_one("#tool-test-result", Static).update(text)
+
+
+class AddShellCommandModal(ModalScreen):
+    """Add a command prefix to tools.shellAllowlist."""
+
+    def compose(self):
+        with Vertical(id="add-shell-container"):
+            yield Label("Add Shell Command")
+            yield Label("Prefix must match start of command (e.g. git status):")
+            yield Input(placeholder="git status", id="shell-command-input")
+            with Container(id="button-container"):
+                yield Button("Add", id="add-button", variant="primary")
+                yield Button("Cancel", id="cancel-button")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "cancel-button":
+            self.dismiss(None)
+        elif event.button.id == "add-button":
+            command = self.query_one("#shell-command-input", Input).value.strip()
+            self.dismiss(command or None)
 
 
 class SessionBrowserModal(ModalScreen):

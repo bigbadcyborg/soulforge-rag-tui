@@ -24,6 +24,7 @@ app/sessions/*.json
 
 # Application logs
 logs/*.log
+logs/tool_calls.jsonl
 
 # OS/editor junk
 .DS_Store

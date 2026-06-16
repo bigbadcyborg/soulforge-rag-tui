@@ -11,6 +11,7 @@ debugging. Both front ends drive the same :class:`ChatController`.
 from __future__ import annotations
 
 import argparse
+import json
 
 from app.core.chat_controller import ChatController
 from app.core.commands import format_help_text
@@ -63,6 +64,58 @@ def bootstrap(config_path=None):
     report = run_startup_diagnostics(config)
     _log_startup_report(report)
     return config, report
+
+
+def _handle_tools_cli(controller: ChatController, args: str) -> None:
+    if not controller.features.is_enabled("tools"):
+        print("Tools are disabled. Run /features tools on first.")
+        return
+    if not args.strip():
+        print(controller.get_tools_status())
+        return
+    parts = args.split(maxsplit=1)
+    sub = parts[0].lower()
+    rest = parts[1] if len(parts) > 1 else ""
+
+    if sub == "test":
+        name_parts = rest.split(maxsplit=1)
+        if not name_parts:
+            print("Usage: /tools test <name> '<json args>'")
+            return
+        name = name_parts[0]
+        raw_json = name_parts[1] if len(name_parts) > 1 else "{}"
+        try:
+            tool_args = json.loads(raw_json)
+        except json.JSONDecodeError as error:
+            print(f"Invalid JSON: {error}")
+            return
+        if not isinstance(tool_args, dict):
+            print("Args must be a JSON object.")
+            return
+        result = controller.run_tool_test(name, tool_args)
+        status = "OK" if result.success else "FAILED"
+        print(f"[{status}] {result.summary(4000)}")
+        return
+
+    if sub == "add-shell":
+        if not rest.strip():
+            print("Usage: /tools add-shell <command prefix>")
+            return
+        print(controller.add_shell_allowlist_entry(rest.strip()))
+        return
+
+    if sub == "allowlist":
+        allowlist = controller.config.tools.shell_allowlist
+        if not allowlist:
+            print("shellAllowlist is empty.")
+        else:
+            print("shellAllowlist:")
+            for entry in allowlist:
+                print(f"  - {entry}")
+        return
+
+    print(f"Unknown /tools subcommand: {sub}")
+    print("Usage: /tools | /tools test <name> '<json>' | /tools add-shell <cmd> | /tools allowlist")
 
 
 def _handle_features_cli(controller: ChatController, args: str) -> None:
@@ -568,6 +621,25 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
         _handle_session_load_cli(controller, args)
     elif command == "/session-summary":
         _handle_session_summary_cli(controller)
+    elif command in ("/tools", "/tool"):
+        _handle_tools_cli(controller, args)
+    elif command == "/tools-log":
+        print(controller.get_tool_log_view())
+    elif command == "/tool-approve":
+        call_id = args.strip()
+        if not call_id:
+            print("Usage: /tool-approve <call_id>")
+            print(controller.get_tools_status())
+        else:
+            outcome = controller.approve_tool_call(call_id)
+            print(outcome.message)
+    elif command == "/tool-reject":
+        call_id = args.strip()
+        if not call_id:
+            print("Usage: /tool-reject <call_id>")
+        else:
+            outcome = controller.reject_tool_call(call_id)
+            print(outcome.message)
     else:
         print(f"Unknown command: {command}. Type /help for available commands.")
 
@@ -615,11 +687,31 @@ def run_cli() -> None:
 
         if controller.features.is_enabled("streaming"):
             print("\nBot: ", end="", flush=True)
+            parts: list[str] = []
             for token in controller.stream_reply():
                 print(token, end="", flush=True)
+                parts.append(token)
             print()
+            raw_reply = getattr(controller, "_pending_raw_reply", "") or "".join(parts)
         else:
-            print(f"\nBot: {controller.full_reply()}")
+            raw_reply = controller.full_reply()
+            print(f"\nBot: {raw_reply}")
+
+        tool_turn = controller.finalize_assistant_reply(raw_reply)
+        if tool_turn.parse_error:
+            print(f"\n[System] Tool parse warning: {tool_turn.parse_error}")
+        for result in tool_turn.auto_results:
+            status = "ok" if result.success else "failed"
+            print(
+                f"\n[System] Tool result: {result.name} ({status}) — "
+                f"{result.summary()}"
+            )
+        for pending in tool_turn.pending:
+            print(
+                f"\n[System] Tool proposed: {pending.call.name} — "
+                f"approval required (id {pending.call_id}). "
+                "Run /tool-approve or /tool-reject."
+            )
 
         review = controller.complete_turn()
         if review.message:

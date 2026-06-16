@@ -64,6 +64,7 @@ class FeatureConfig:
     kanban: bool = False
     streaming: bool = True
     show_sources: bool = True
+    tools: bool = False
 
 
 # Maps FeatureConfig attribute names to config.yaml camelCase keys.
@@ -76,6 +77,7 @@ FEATURE_YAML_KEYS: dict[str, str] = {
     "kanban": "kanban",
     "streaming": "streaming",
     "show_sources": "showSources",
+    "tools": "tools",
 }
 
 # Short labels used in the status bar and /features list.
@@ -88,6 +90,7 @@ FEATURE_DISPLAY_NAMES: dict[str, str] = {
     "kanban": "kanban",
     "show_sources": "sources",
     "streaming": "streaming",
+    "tools": "tools",
 }
 
 
@@ -195,6 +198,29 @@ class LoggingConfig:
 
 
 @dataclass
+class ToolsConfig:
+    allow_write: bool = False
+    allow_shell: bool = False
+    read_roots: list[str] = field(
+        default_factory=lambda: ["./docs", "./app"]
+    )
+    write_roots: list[str] = field(
+        default_factory=lambda: ["./app/memory", "./app/tasks"]
+    )
+    max_read_bytes: int = 65536
+    shell_allowlist: list[str] = field(default_factory=list)
+    auto_approve_read_only: bool = True
+
+    @property
+    def read_root_paths(self) -> list[Path]:
+        return [resolve_path(value) for value in self.read_roots]
+
+    @property
+    def write_root_paths(self) -> list[Path]:
+        return [resolve_path(value) for value in self.write_roots]
+
+
+@dataclass
 class AppConfig:
     model: ModelConfig
     generation: GenerationConfig
@@ -206,6 +232,7 @@ class AppConfig:
     tasks: TasksConfig
     sessions: SessionsConfig
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    tools: ToolsConfig = field(default_factory=ToolsConfig)
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -260,6 +287,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         kanban=feat_section.get("kanban", False),
         streaming=feat_section.get("streaming", True),
         show_sources=feat_section.get("showSources", True),
+        tools=feat_section.get("tools", False),
     )
 
     rag_section = _section(data, "rag")
@@ -323,6 +351,19 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         console=logging_section.get("console", False),
     )
 
+    tools_section = _section(data, "tools")
+    tools_cfg = ToolsConfig(
+        allow_write=tools_section.get("allowWrite", False),
+        allow_shell=tools_section.get("allowShell", False),
+        read_roots=tools_section.get("readRoots", ["./docs", "./app"]),
+        write_roots=tools_section.get(
+            "writeRoots", ["./app/memory", "./app/tasks"]
+        ),
+        max_read_bytes=tools_section.get("maxReadBytes", 65536),
+        shell_allowlist=tools_section.get("shellAllowlist", []),
+        auto_approve_read_only=tools_section.get("autoApproveReadOnly", True),
+    )
+
     return AppConfig(
         model=model,
         generation=generation,
@@ -334,6 +375,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         tasks=tasks,
         sessions=sessions,
         logging=logging_cfg,
+        tools=tools_cfg,
         raw=data,
     )
 
@@ -344,6 +386,53 @@ def features_to_yaml_dict(features: FeatureConfig) -> dict[str, bool]:
         yaml_key: getattr(features, attr)
         for attr, yaml_key in FEATURE_YAML_KEYS.items()
     }
+
+
+def tools_to_yaml_dict(tools: ToolsConfig) -> dict[str, Any]:
+    """Convert a ToolsConfig to the camelCase dict written under ``tools:``."""
+    return {
+        "allowWrite": tools.allow_write,
+        "allowShell": tools.allow_shell,
+        "readRoots": list(tools.read_roots),
+        "writeRoots": list(tools.write_roots),
+        "maxReadBytes": tools.max_read_bytes,
+        "shellAllowlist": list(tools.shell_allowlist),
+        "autoApproveReadOnly": tools.auto_approve_read_only,
+    }
+
+
+def save_tools(
+    config: AppConfig,
+    path: str | Path | None = None,
+) -> None:
+    """Persist the current tools section to ``config.yaml`` (atomic write)."""
+    config_path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
+
+    if config_path.exists():
+        with config_path.open("r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+    else:
+        data = dict(config.raw) if config.raw else {}
+
+    data["tools"] = tools_to_yaml_dict(config.tools)
+    config.raw = data
+
+    directory = config_path.parent
+    directory.mkdir(parents=True, exist_ok=True)
+
+    fd, temp_path = tempfile.mkstemp(
+        dir=directory,
+        prefix=".config-",
+        suffix=".yaml.tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            yaml.safe_dump(data, handle, default_flow_style=False, sort_keys=False)
+        os.replace(temp_path, config_path)
+    except Exception:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+        raise
 
 
 def save_features(

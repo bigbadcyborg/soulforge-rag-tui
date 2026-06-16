@@ -38,6 +38,41 @@ COMMANDS: tuple[CommandHelp, ...] = (
         "/config",
         "Resolved configuration paths, features, and limits (read-only)",
     ),
+    CommandHelp(
+        "Tools",
+        "/tools",
+        "Open tools workshop (TUI) or list status (CLI)",
+    ),
+    CommandHelp(
+        "Tools",
+        "/tools test <name> '<json>'",
+        "Run a manual tool test (CLI)",
+    ),
+    CommandHelp(
+        "Tools",
+        "/tools add-shell <command>",
+        "Add a shell command prefix to shellAllowlist",
+    ),
+    CommandHelp(
+        "Tools",
+        "/tools allowlist",
+        "List shellAllowlist entries",
+    ),
+    CommandHelp(
+        "Tools",
+        "/tools-log",
+        "Show recent tool call audit log entries",
+    ),
+    CommandHelp(
+        "Tools",
+        "/tool-approve <id>",
+        "Approve and execute a pending tool call (CLI)",
+    ),
+    CommandHelp(
+        "Tools",
+        "/tool-reject <id>",
+        "Reject a pending tool call (CLI)",
+    ),
     CommandHelp("General", "/exit, /quit", "Exit the application"),
     CommandHelp(
         "Features",
@@ -400,6 +435,34 @@ def format_diagnostics_help_text() -> str:
     )
 
 
+def format_tools_help_text() -> str:
+    return "\n".join(
+        [
+            "Tool harness — quick guide",
+            "",
+            "Enable: /features tools on",
+            "Configure: tools.allowWrite, tools.allowShell, readRoots in config.yaml",
+            "",
+            "Assistant proposes tools via ```tool JSON blocks in replies.",
+            "Read-only tools may auto-run; write/shell/action tools need approval.",
+            "",
+            "Commands:",
+            "  /tools           Open workshop (TUI) or status (CLI)",
+            "  /tools test      Manual test: /tools test read_file '{\"path\":\"docs\"}'",
+            "  /tools add-shell Add shellAllowlist entry",
+            "  /tools allowlist List allowed shell prefixes",
+            "  /tools-log       Audit log of tool events",
+            "  /tool-approve    Execute a pending tool by ID",
+            "  /tool-reject     Discard a pending tool",
+            "",
+            "Bridge tools (create_task, update_memory, create_skill) queue existing",
+            "approval flows — they do not bypass /memory-accept or /skill-accept.",
+            "",
+            "Back to all commands: /help",
+        ]
+    )
+
+
 def format_help_text(topic: str = "", config: AppConfig | None = None) -> str:
     """Format command help for /help or /help <topic>."""
     topic_key = topic.strip().lower()
@@ -409,6 +472,8 @@ def format_help_text(topic: str = "", config: AppConfig | None = None) -> str:
         return format_sessions_help_text()
     if topic_key in ("diagnostics", "health", "config"):
         return format_diagnostics_help_text()
+    if topic_key in ("tools", "tool"):
+        return format_tools_help_text()
 
     lines = ["Available commands:", ""]
     current_category = ""

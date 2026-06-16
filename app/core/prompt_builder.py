@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from app.core.config import AppConfig
 from app.memory.memory_manager import MemorySnapshot
+from app.tools.permissions import is_tool_available
+from app.tools.registry import TOOL_DESCRIPTIONS
 
 # Kept intentionally empty so the persona in SOUL.md remains the dominant voice.
 # Future iterations can populate baseline operating rules here.
@@ -52,6 +54,26 @@ TASK_GROUNDING_RULES = (
     "modify it during chat. To persist task changes, the user runs /task-suggest "
     "and approves suggestions in the review modal."
 )
+
+TOOL_GROUNDING_RULES = (
+    "IMPORTANT - LOCAL TOOLS:\n"
+    "You may propose tools using a fenced ```tool JSON block. Do not claim you "
+    "read, wrote, or ran anything unless a tool block is present and approved.\n"
+    "Format:\n"
+    '```tool\n{"tools": [{"name": "tool_name", "args": {...}, "rationale": "why"}]}\n```\n'
+    "Write/shell/task/memory/skill tools require user approval before execution.\n"
+    "Available tools:\n"
+)
+
+
+def build_tool_prompt_section(config: AppConfig) -> str:
+    if not config.features.tools:
+        return ""
+    lines = [TOOL_GROUNDING_RULES]
+    for name, description in TOOL_DESCRIPTIONS.items():
+        if is_tool_available(config, name):
+            lines.append(f"- {name}: {description}")
+    return "\n".join(lines)
 
 
 class PromptBuilder:
@@ -101,6 +123,10 @@ class PromptBuilder:
         if features.kanban and task_summary.strip():
             sections.append(TASK_GROUNDING_RULES)
             sections.append(f"# Active Tasks\n{task_summary.strip()}")
+
+        tool_section = build_tool_prompt_section(self.config)
+        if tool_section:
+            sections.append(tool_section)
 
         if not sections:
             return DEFAULT_SYSTEM_PROMPT

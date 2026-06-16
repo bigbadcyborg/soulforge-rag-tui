@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.core.compute_backend import detect_compute_backend
-from app.core.config import DEFAULT_CONFIG_PATH, AppConfig, features_to_yaml_dict
+from app.core.config import DEFAULT_CONFIG_PATH, PROJECT_ROOT, AppConfig, features_to_yaml_dict
 from app.core.config_validator import validate_config
 from app.rag.retriever import get_store_stats
 from app.utils.guards import safe_json_load
@@ -132,6 +132,11 @@ def format_config_view(config: AppConfig) -> str:
             "Logging:",
             f"  logPath: {config.logging.log_path}",
             f"  level: {config.logging.level}",
+            "",
+            "Tools:",
+            f"  enabled: {str(config.features.tools).lower()}",
+            f"  allowWrite: {config.tools.allow_write}",
+            f"  allowShell: {config.tools.allow_shell}",
         ]
     )
 
@@ -402,5 +407,47 @@ def run_startup_diagnostics(
                 message=detail,
             )
         )
+
+    if config.features.tools:
+        if config.tools.allow_shell:
+            report.add(
+                DiagnosticCheck(
+                    name="Tools: shell",
+                    status="warn",
+                    message="tools.allowShell is enabled",
+                    remediation="Shell tools can modify the system — use shellAllowlist.",
+                )
+            )
+        if not config.tools.read_roots:
+            report.add(
+                DiagnosticCheck(
+                    name="Tools: readRoots",
+                    status="warn",
+                    message="readRoots is empty while tools are enabled",
+                    remediation="Add paths under tools.readRoots in config.yaml.",
+                )
+            )
+        logs_dir = PROJECT_ROOT / "logs"
+        try:
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            test_file = logs_dir / ".write_test"
+            test_file.write_text("", encoding="utf-8")
+            test_file.unlink(missing_ok=True)
+            report.add(
+                DiagnosticCheck(
+                    name="Tools: audit log",
+                    status="ok",
+                    message=f"logs/ writable for tool_calls.jsonl",
+                )
+            )
+        except OSError as error:
+            report.add(
+                DiagnosticCheck(
+                    name="Tools: audit log",
+                    status="warn",
+                    message=f"Cannot write logs/: {error}",
+                    remediation="Check logs directory permissions.",
+                )
+            )
 
     return report

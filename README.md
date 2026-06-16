@@ -14,6 +14,7 @@ This project is designed to run locally (Windows/WSL) with CUDA acceleration for
 * **Interactive Doc Selection**: Use `/rag` to select specific documents from your vector store via a checkbox-based modal.
 * **Document Ingestion**: Index `docs/` into ChromaDB with `/ingest` or `python ingestDocs.py` (text + PDF/OCR).
 * **Source Viewer**: Inspect retrieved chunks from the last question with `/sources`.
+* **Tools Workshop**: Open `/tools` (or `/tool`) in TUI to add shell allowlist entries and run manual tool tests with visible output.
 * **WSL 2 & CUDA support**: Optimized for NVIDIA GPUs (including Blackwell/RTX 5090) within WSL Ubuntu.
 * **Persona Hot-Reload**: Update `SOUL.md` and reload the character instantly with `/reload-soul`.
 * **Compute Indicator**: Status bar shows **GPU** or **CPU** after the model loads.
@@ -29,6 +30,11 @@ Type `/help` in the TUI or CLI for the full list with descriptions. Key commands
 * `/rag all`: Enable RAG using all indexed documents.
 * `/rag doc1.txt,doc2.txt`: Enable RAG filtered to specific documents.
 * `/features`: Open feature toggle menu (TUI) or list flags (CLI).
+* `/tools` or `/tool`: Open the tools workshop menu (TUI) or show tools status (CLI).
+* `/tools test <name> '<json args>'`: Run a manual tool test (CLI).
+* `/tools add-shell <command>`: Add a command prefix to `tools.shellAllowlist`.
+* `/tools allowlist`: Show current shell allowlist entries.
+* `/tools-log`: View recent tool execution audit log entries.
 * `/status`: Show model, active features, and RAG index stats.
 * `/reload-soul`: Refresh persona from `SOUL.md` without restarting.
 * `/help`: Show all commands with descriptions.
@@ -305,6 +311,36 @@ Enable RAG and ask questions:
 ```text
 /rag on
 ```
+
+## Tool Harness / Tools Workshop
+
+The optional tool harness lets the assistant propose or run controlled local tools.
+
+Default behavior:
+
+* `features.tools` is off by default.
+* Risky tools still require approval.
+* Shell tools are blocked unless both `allowShell: true` and `shellAllowlist` contains matching command prefixes.
+* Tool events are logged to `logs/tool_calls.jsonl`.
+
+Enable tools in `config.yaml`:
+
+```yaml
+features:
+  tools: true
+
+tools:
+  allowWrite: false
+  allowShell: true
+  shellAllowlist:
+    - git status
+```
+
+In TUI:
+
+* Run `/tools` (or `/tool`) to open the workshop.
+* Use **Add Shell Command** to append a command prefix.
+* Use **Test Tool** to run a manual test and inspect output.
 
 ## Startup Scripts
 

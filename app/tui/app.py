@@ -42,6 +42,10 @@ from app.tui.widgets import (
     TaskDetailModal,
     TaskCreateModal,
     TaskSuggestionModal,
+    ToolCallModal,
+    ToolsMenuModal,
+    ToolTestModal,
+    AddShellCommandModal,
     SessionBrowserModal,
     SessionDetailModal,
     SessionSaveModal,
@@ -131,14 +135,25 @@ class SoulForgeApp(App):
                 self._new_assistant_message
             )
 
+            raw_reply = ""
             if self.controller.features.is_enabled("streaming"):
+                parts: list[str] = []
                 for token in self.controller.stream_reply():
+                    parts.append(token)
                     self.call_from_thread(message.append, token)
                     self.call_from_thread(self._scroll_to_end)
+                raw_reply = getattr(
+                    self.controller, "_pending_raw_reply", ""
+                ) or "".join(parts)
             else:
-                reply = self.controller.full_reply()
-                self.call_from_thread(message.set_text, reply)
+                raw_reply = self.controller.full_reply()
+                self.call_from_thread(message.set_text, raw_reply)
                 self.call_from_thread(self._scroll_to_end)
+
+            tool_turn = self.controller.finalize_assistant_reply(raw_reply)
+            if tool_turn.display_text != raw_reply:
+                self.call_from_thread(message.set_text, tool_turn.display_text)
+            self.call_from_thread(self._handle_tool_turn, tool_turn)
 
             self.call_from_thread(self.status_bar.set_state, "Reviewing memory...")
             review = self.controller.complete_turn()
@@ -202,6 +217,125 @@ class SoulForgeApp(App):
         self.prompt.disabled = False
         self.prompt.focus()
         self._scroll_to_end()
+
+    def _handle_tool_turn(self, tool_turn) -> None:
+        if tool_turn.parse_error:
+            self._write_message(
+                "system", f"Tool parse warning: {tool_turn.parse_error}"
+            )
+        for result in tool_turn.auto_results:
+            status = "ok" if result.success else "failed"
+            self._write_message(
+                "system",
+                f"Tool result: {result.name} ({status}) — {result.summary()}",
+            )
+        if tool_turn.pending:
+            for pending in tool_turn.pending:
+                self._write_message(
+                    "system",
+                    f"Tool proposed: {pending.call.name} — "
+                    f"approval required (id {pending.call_id})",
+                )
+            self._open_tool_approval_modal()
+
+    def _open_tool_approval_modal(self) -> None:
+        if not self.controller.pending_tool_calls:
+            return
+        pending = self.controller.pending_tool_calls[0]
+        preview = self.controller.format_tool_call_preview(pending)
+        total = len(self.controller.pending_tool_calls)
+        modal = ToolCallModal(pending, preview, 0, total)
+        self.push_screen(modal, self._handle_tool_call_result)
+
+    def _handle_tool_call_result(self, result: tuple[str, str] | None) -> None:
+        if result is None:
+            return
+        action, call_id = result
+        if action == "approve":
+            outcome = self.controller.approve_tool_call(call_id)
+            self._write_message("system", outcome.message)
+            if outcome.success:
+                self._refresh_features()
+        elif action == "reject":
+            outcome = self.controller.reject_tool_call(call_id)
+            self._write_message("system", outcome.message)
+        if self.controller.pending_tool_calls:
+            self._open_tool_approval_modal()
+
+    def _handle_tools_command(self, args: str = "") -> None:
+        if not self.controller.features.is_enabled("tools"):
+            self._write_message(
+                "system",
+                "Tools are disabled. Run /features tools on first.",
+            )
+            return
+        arg = args.strip().lower()
+        if arg == "log":
+            self._handle_tools_log_command()
+            return
+        self._open_tools_menu()
+
+    def _open_tools_menu(self) -> None:
+        menu_data = self.controller.get_tools_menu_data()
+        self.push_screen(ToolsMenuModal(menu_data), self._handle_tools_menu_result)
+
+    def _handle_tools_menu_result(self, result) -> None:
+        if result is None:
+            return
+        if result == "test":
+            self._open_tool_test_modal()
+        elif result == "add_shell":
+            self.push_screen(AddShellCommandModal(), self._handle_add_shell_result)
+        elif result == "log":
+            self._handle_tools_log_command()
+        elif isinstance(result, tuple) and result[0] == "remove":
+            message = self.controller.remove_shell_allowlist_entry(result[1])
+            self._write_message("system", message)
+            self._open_tools_menu()
+
+    def _handle_add_shell_result(self, command: str | None) -> None:
+        if not command:
+            self._open_tools_menu()
+            return
+        message = self.controller.add_shell_allowlist_entry(command)
+        self._write_message("system", message)
+        self._open_tools_menu()
+
+    def _open_tool_test_modal(self) -> None:
+        menu_data = self.controller.get_tools_menu_data()
+        tool_defs = menu_data.get("tool_defs") or []
+
+        def run_test(name: str, args: dict) -> tuple[bool, str]:
+            result = self.controller.run_tool_test(name, args)
+            return result.success, result.summary(2000)
+
+        self.push_screen(
+            ToolTestModal(tool_defs, run_test),
+            self._handle_tool_test_close,
+        )
+
+    def _handle_tool_test_close(self, _result) -> None:
+        self._open_tools_menu()
+
+    def _handle_tools_log_command(self) -> None:
+        self._write_message("system", self.controller.get_tool_log_view())
+
+    def _handle_tool_approve_command(self, args: str) -> None:
+        call_id = args.strip()
+        if not call_id:
+            self._write_message("system", "Usage: /tool-approve <call_id>")
+            self._write_message("system", self.controller.get_tools_status())
+            return
+        outcome = self.controller.approve_tool_call(call_id)
+        self._write_message("system", outcome.message)
+
+    def _handle_tool_reject_command(self, args: str) -> None:
+        call_id = args.strip()
+        if not call_id:
+            self._write_message("system", "Usage: /tool-reject <call_id>")
+            return
+        outcome = self.controller.reject_tool_call(call_id)
+        self._write_message("system", outcome.message)
 
     def _ingest_done(self) -> None:
         self.status_bar.set_state("Ready")
@@ -1103,6 +1237,14 @@ class SoulForgeApp(App):
             self._handle_session_load_command(args)
         elif command == "/session-summary":
             self._handle_session_summary_command()
+        elif command in ("/tools", "/tool"):
+            self._handle_tools_command(args)
+        elif command == "/tools-log":
+            self._handle_tools_log_command()
+        elif command == "/tool-approve":
+            self._handle_tool_approve_command(args)
+        elif command == "/tool-reject":
+            self._handle_tool_reject_command(args)
         else:
             self._write_message(
                 "system", f"Unknown command: {command}. Type /help."

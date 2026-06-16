@@ -402,7 +402,8 @@ MemoryReviewModal {
 }
 
 #task-create-container,
-#task-suggestion-container {
+#task-suggestion-container,
+#tool-call-container {
     width: 52;
     height: auto;
     max-height: 85%;
@@ -424,6 +425,23 @@ MemoryReviewModal {
     margin-bottom: 1;
     border: solid $panel;
     padding: 0 1;
+}
+
+#tool-call-container {
+    width: 70;
+    height: 28;
+}
+
+#tool-call-scroll {
+    height: 1fr;
+    margin-bottom: 1;
+    border: solid $panel;
+    padding: 0 1;
+}
+
+#tool-call-content {
+    width: 100%;
+    color: $text-muted;
 }
 
 #task-suggestion-container {
@@ -508,5 +526,88 @@ MemoryReviewModal {
 }
 
 #session-save-container Input {
+    margin-bottom: 1;
+}
+
+/* Tools workshop modals */
+ToolsMenuModal, ToolTestModal, AddShellCommandModal {
+    align: center middle;
+}
+
+#tools-menu-container, #add-shell-container {
+    width: 80;
+    height: 30;
+    background: $surface;
+    border: solid $primary;
+    padding: 1 2;
+}
+
+#tool-test-container {
+    width: 80;
+    height: 37;
+    background: $surface;
+    border: solid $primary;
+    padding: 1 2;
+    layout: vertical;
+}
+
+#tool-test-body {
+    height: 1fr;
+    margin-bottom: 1;
+    scrollbar-size-vertical: 1;
+}
+
+#tools-menu-scroll {
+    height: 1fr;
+    margin-bottom: 1;
+    border: solid $panel;
+    padding: 0 1;
+}
+
+#tool-test-picker {
+    height: 10;
+    min-height: 8;
+    margin-bottom: 1;
+    border: solid $panel;
+    padding: 0 1;
+    scrollbar-size-vertical: 1;
+}
+
+#tool-test-result-scroll {
+    height: 6;
+    min-height: 6;
+    margin-bottom: 1;
+    border: solid $panel;
+    padding: 0 1;
+    scrollbar-size-vertical: 1;
+}
+
+#tool-test-container #button-container {
+    height: auto;
+    min-height: 3;
+    margin-top: 0;
+}
+
+#tools-menu-catalog, #tool-test-result {
+    width: 100%;
+    color: $text-muted;
+}
+
+.allowlist-row {
+    height: auto;
+    margin-bottom: 1;
+}
+
+.allowlist-entry {
+    width: 1fr;
+}
+
+.tool-pick-btn {
+    width: 100%;
+    margin-bottom: 1;
+}
+
+#tool-test-args {
+    height: 4;
     margin-bottom: 1;
 }

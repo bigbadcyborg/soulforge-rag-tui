@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Callable, Iterator
 
 from app.core.compute_backend import ComputeBackend
-from app.core.config import PROJECT_ROOT, AppConfig
+from app.core.config import PROJECT_ROOT, AppConfig, save_tools
 from app.core.diagnostics import (
     format_config_view,
     format_diagnostics_view,
@@ -62,6 +62,16 @@ from app.tasks.task_suggester import (
     format_suggestions_review,
     generate_suggestions,
 )
+from app.tools.executor import ToolExecutionContext, ToolExecutor
+from app.tools.models import PendingToolCall, ToolCall, ToolResult, ToolTurnResult
+from app.tools.parser import parse_tool_calls
+from app.tools.permissions import is_tool_available, tool_risk
+from app.tools.registry import (
+    TOOL_EXAMPLE_ARGS,
+    format_tools_catalog,
+    list_tool_defs,
+)
+from app.tools.tool_log import log_tool_event, read_recent_log
 
 SOUL_PATH = PROJECT_ROOT / "SOUL.md"
 
@@ -111,6 +121,13 @@ class TaskSuggestResult:
 
 
 @dataclass
+class ToolActionResult:
+    success: bool
+    message: str = ""
+    result: ToolResult | None = None
+
+
+@dataclass
 class SessionActionResult:
     success: bool
     message: str = ""
@@ -155,6 +172,7 @@ class ChatController:
         self._dismissed_curator_ids: set[str] = set()
         self.pending_task_suggestions: list[TaskSuggestion] = []
         self._dismissed_task_suggestion_ids: set[str] = set()
+        self.pending_tool_calls: list[PendingToolCall] = []
         self.active_session_id: str | None = None
 
         # RAG is initialized lazily to avoid loading embedding model at startup
@@ -168,7 +186,7 @@ class ChatController:
         self.loaded: bool = False
 
     def _on_feature_change(self, key: str, enabled: bool) -> None:
-        if key in ("soul", "memory", "skills", "kanban"):
+        if key in ("soul", "memory", "skills", "kanban", "tools"):
             self._rebuild_system_prompt()
         elif key == "rag" and enabled and self.selected_sources is None:
             self.selected_sources = self.get_available_sources()
@@ -1273,23 +1291,228 @@ class ChatController:
         except Exception as error:  # noqa: BLE001
             return f"Failed to format config: {error}"
 
+    def _tool_executor(self) -> ToolExecutor:
+        return ToolExecutor(
+            ToolExecutionContext(
+                config=self.config,
+                task_manager=self.task_manager,
+                turn_count=self.turn_count,
+                retriever=self.retriever,
+                on_memory_suggestion=self._queue_memory_suggestion_from_tool,
+                on_skill_suggestion=self._queue_skill_suggestion_from_tool,
+            )
+        )
+
+    def _queue_memory_suggestion_from_tool(self, suggestion) -> None:
+        self.pending_suggestion = suggestion
+
+    def _queue_skill_suggestion_from_tool(self, suggestion) -> None:
+        self.pending_skill_suggestion = suggestion
+
+    def process_assistant_reply(self, raw_text: str) -> ToolTurnResult:
+        """Parse tool blocks, update assistant message, run auto tools, queue risky ones."""
+        display_text = raw_text.strip()
+        if not self.features.is_enabled("tools"):
+            self._set_last_assistant_content(display_text)
+            return ToolTurnResult(display_text, [], [], None)
+
+        display, calls, parse_error = parse_tool_calls(raw_text)
+        if not display.strip():
+            display = display_text
+        self._set_last_assistant_content(display)
+
+        if parse_error:
+            log_tool_event("parse_error", detail=parse_error)
+            return ToolTurnResult(display, [], [], parse_error)
+
+        if not calls:
+            return ToolTurnResult(display, [], [], None)
+
+        executor = self._tool_executor()
+        auto_results: list[ToolResult] = []
+        pending: list[PendingToolCall] = []
+
+        for call in calls:
+            pending_call = executor.classify(call)
+            log_tool_event(
+                "proposed",
+                call_id=pending_call.call_id,
+                name=call.name,
+                args=call.args,
+                detail=call.rationale,
+            )
+            if pending_call.requires_approval:
+                pending.append(pending_call)
+                self.pending_tool_calls.append(pending_call)
+            else:
+                result = executor.execute(pending_call)
+                auto_results.append(result)
+
+        if auto_results:
+            self._inject_tool_results(auto_results)
+
+        return ToolTurnResult(display, auto_results, pending, None)
+
+    def _set_last_assistant_content(self, content: str) -> None:
+        if self.messages and self.messages[-1]["role"] == "assistant":
+            self.messages[-1]["content"] = content
+        else:
+            self.messages.append({"role": "assistant", "content": content})
+
+    def _inject_tool_results(self, results: list[ToolResult]) -> None:
+        if not results:
+            return
+        lines = ["Tool results:"]
+        for result in results:
+            status = "ok" if result.success else "failed"
+            lines.append(f"- {result.name} ({status}): {result.summary()}")
+        self.messages.append({"role": "system", "content": "\n".join(lines)})
+
+    def approve_tool_call(self, call_id: str) -> ToolActionResult:
+        pending = self._pop_pending_tool(call_id)
+        if pending is None:
+            return ToolActionResult(False, f"No pending tool call: {call_id}")
+        result = self._tool_executor().execute(pending)
+        if result.success:
+            self._inject_tool_results([result])
+            return ToolActionResult(True, result.summary(), result)
+        return ToolActionResult(False, result.error or "Tool failed", result)
+
+    def reject_tool_call(self, call_id: str) -> ToolActionResult:
+        pending = self._pop_pending_tool(call_id)
+        if pending is None:
+            return ToolActionResult(False, f"No pending tool call: {call_id}")
+        log_tool_event(
+            "rejected",
+            call_id=call_id,
+            name=pending.call.name,
+            args=pending.call.args,
+        )
+        return ToolActionResult(True, f"Rejected tool call {pending.call.name}.")
+
+    def _pop_pending_tool(self, call_id: str) -> PendingToolCall | None:
+        for index, pending in enumerate(self.pending_tool_calls):
+            if pending.call_id == call_id or pending.call_id.startswith(call_id):
+                return self.pending_tool_calls.pop(index)
+        return None
+
+    def get_tools_status(self) -> str:
+        lines = [format_tools_catalog(self.config)]
+        if self.pending_tool_calls:
+            lines.append("")
+            lines.append(f"Pending approvals: {len(self.pending_tool_calls)}")
+            for pending in self.pending_tool_calls:
+                lines.append(
+                    f"  {pending.call_id}: {pending.call.name} "
+                    f"[{pending.risk.value}]"
+                )
+        return "\n".join(lines)
+
+    def get_tool_log_view(self, limit: int = 20) -> str:
+        return read_recent_log(limit)
+
+    def get_tools_menu_data(self) -> dict:
+        """Data for the TUI tools workshop modal."""
+        tools_cfg = self.config.tools
+        return {
+            "catalog": format_tools_catalog(self.config),
+            "tool_defs": [
+                {
+                    "name": tool_def.name,
+                    "risk": tool_def.risk.value,
+                    "description": tool_def.description,
+                    "available": is_tool_available(self.config, tool_def.name),
+                    "example_args": TOOL_EXAMPLE_ARGS.get(tool_def.name, "{}"),
+                }
+                for tool_def in list_tool_defs(self.config)
+            ],
+            "allowlist": list(tools_cfg.shell_allowlist),
+            "allow_shell": tools_cfg.allow_shell,
+            "allow_write": tools_cfg.allow_write,
+            "tools_enabled": self.features.is_enabled("tools"),
+            "pending_count": len(self.pending_tool_calls),
+        }
+
+    def run_tool_test(self, name: str, args: dict) -> ToolResult:
+        """Run a tool immediately for manual testing; bypasses approval modal."""
+        name = name.strip()
+        try:
+            call = ToolCall(name=name, args=args, rationale="manual test")
+            pending = PendingToolCall.create(
+                call,
+                tool_risk(name),
+                requires_approval=False,
+            )
+            log_tool_event(
+                "manual_test",
+                call_id=pending.call_id,
+                name=name,
+                args=args,
+                detail="user-initiated test",
+            )
+            result = self._tool_executor().execute(pending)
+            result.status = "manual_test"
+            return result
+        except Exception as error:  # noqa: BLE001
+            return ToolResult(
+                call_id="",
+                name=name,
+                success=False,
+                error=str(error),
+                status="failed",
+            )
+
+    def add_shell_allowlist_entry(self, command: str) -> str:
+        command = command.strip()
+        if not command:
+            return "Empty command — nothing added."
+        allowlist = self.config.tools.shell_allowlist
+        if command in allowlist:
+            return f"Already on allowlist: {command}"
+        allowlist.append(command)
+        save_tools(self.config)
+        return f"Added to shellAllowlist: {command}"
+
+    def remove_shell_allowlist_entry(self, command: str) -> str:
+        command = command.strip()
+        allowlist = self.config.tools.shell_allowlist
+        if command not in allowlist:
+            return f"Not on allowlist: {command}"
+        allowlist.remove(command)
+        save_tools(self.config)
+        return f"Removed from shellAllowlist: {command}"
+
+    def format_tool_call_preview(self, pending: PendingToolCall) -> str:
+        import json
+
+        args_text = json.dumps(pending.call.args, indent=2)
+        lines = [
+            f"Tool: {pending.call.name}",
+            f"Risk: {pending.risk.value}",
+            f"ID: {pending.call_id}",
+            f"Args:\n{args_text}",
+        ]
+        if pending.call.rationale:
+            lines.append(f"Rationale: {pending.call.rationale}")
+        return "\n".join(lines)
+
     def stream_reply(self) -> Iterator[str]:
-        """Yield reply tokens, appending the full assistant message at the end."""
+        """Yield reply tokens; caller must run process_assistant_reply on full text."""
         stream = self.runtime.create_chat_completion(self.messages, stream=True)
         parts: list[str] = []
         for token in self.runtime.iter_stream_text(stream):
             parts.append(token)
             yield token
-        self.messages.append(
-            {"role": "assistant", "content": "".join(parts).strip()}
-        )
+        self._pending_raw_reply = "".join(parts).strip()
 
     def full_reply(self) -> str:
-        """Generate a complete (non-streamed) reply and append it."""
+        """Generate a complete (non-streamed) reply; caller runs process_assistant_reply."""
         response = self.runtime.create_chat_completion(self.messages, stream=False)
-        reply = response["choices"][0]["message"]["content"].strip()
-        self.messages.append({"role": "assistant", "content": reply})
-        return reply
+        return response["choices"][0]["message"]["content"].strip()
+
+    def finalize_assistant_reply(self, raw_text: str) -> ToolTurnResult:
+        """Process tool blocks and update conversation state."""
+        return self.process_assistant_reply(raw_text)
 
     @property
     def model_name(self) -> str:

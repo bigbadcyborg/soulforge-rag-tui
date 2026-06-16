@@ -23,6 +23,7 @@ features:
   kanban: false
   streaming: true
   showSources: true
+  tools: false
 rag:
   dbPath: ./chromaDb
   docsPath: ./docs
@@ -61,3 +62,15 @@ logging:
   logPath: ./logs/soulforge.log
   level: info
   console: false
+tools:
+  allowWrite: false
+  allowShell: false
+  readRoots:
+  - ./docs
+  - ./app
+  writeRoots:
+  - ./app/memory
+  - ./app/tasks
+  maxReadBytes: 65536
+  shellAllowlist: []
+  autoApproveReadOnly: true
