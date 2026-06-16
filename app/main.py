@@ -391,6 +391,35 @@ def _handle_task_reject_cli(controller: ChatController, args: str) -> None:
     print("Task suggestion rejected.")
 
 
+def _handle_session_list_cli(controller: ChatController) -> None:
+    print(controller.list_sessions_view())
+
+
+def _handle_session_save_cli(controller: ChatController, args: str) -> None:
+    if not args.strip():
+        print("Usage: /session-save <title>")
+        return
+    outcome = controller.save_session_direct(args.strip())
+    print(outcome.message)
+
+
+def _handle_session_load_cli(controller: ChatController, args: str) -> None:
+    if not args.strip():
+        print("Usage: /session-load <id>")
+        print(controller.list_sessions_view())
+        return
+    outcome = controller.load_session_direct(args.strip())
+    print(outcome.message)
+
+
+def _handle_session_summary_cli(controller: ChatController) -> None:
+    result = controller.run_session_summary()
+    print(result.message)
+    if result.success and result.summary:
+        print("\n--- Summary ---")
+        print(result.summary)
+
+
 def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
     """Handle CLI commands. Return True if should continue, False if should exit."""
     parts = cmd.split(maxsplit=1)
@@ -481,6 +510,14 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
         _handle_task_accept_cli(controller, args)
     elif command == "/task-reject":
         _handle_task_reject_cli(controller, args)
+    elif command == "/session-list":
+        _handle_session_list_cli(controller)
+    elif command == "/session-save":
+        _handle_session_save_cli(controller, args)
+    elif command == "/session-load":
+        _handle_session_load_cli(controller, args)
+    elif command == "/session-summary":
+        _handle_session_summary_cli(controller)
     else:
         print(f"Unknown command: {command}. Type /help for available commands.")
 

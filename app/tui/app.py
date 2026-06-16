@@ -39,6 +39,9 @@ from app.tui.widgets import (
     TaskDetailModal,
     TaskCreateModal,
     TaskSuggestionModal,
+    SessionBrowserModal,
+    SessionDetailModal,
+    SessionSaveModal,
 )
 
 
@@ -208,6 +211,15 @@ class SoulForgeApp(App):
 
     def _scroll_to_end(self) -> None:
         self.chat_view.scroll_end(animate=False)
+
+    def _rebuild_chat_view(self) -> None:
+        """Rebuild visible chat from controller.messages after session load."""
+        self.chat_view.remove_children()
+        for message in self.controller.get_conversation_messages():
+            role = str(message.get("role", "system"))
+            text = self.controller.message_for_display(message)
+            if text.strip():
+                self._write_message(role, text)
 
     def _status_text(self) -> str:
         stats = self.controller.get_rag_stats()
@@ -826,6 +838,98 @@ class SoulForgeApp(App):
         self.controller.dismiss_task_suggestion(suggestion_id)
         self._write_message("system", "Task suggestion rejected.")
 
+    def _default_session_title(self) -> str:
+        from app.sessions.session_manager import title_from_messages
+
+        return title_from_messages(self.controller.get_conversation_messages())
+
+    def _handle_session_list_command(self) -> None:
+        sessions = self.controller.session_manager.list_sessions()
+        modal = SessionBrowserModal(sessions)
+        self.app.push_screen(modal, self._handle_session_browser_result)
+
+    def _handle_session_browser_result(self, result) -> None:
+        if result == "save":
+            self._open_session_save_modal()
+        elif isinstance(result, tuple) and result[0] == "view":
+            session_id = result[1]
+            sessions = self.controller.session_manager.list_sessions()
+            meta = next((item for item in sessions if item.id == session_id), None)
+            if meta:
+                modal = SessionDetailModal(meta)
+                self.app.push_screen(modal, self._handle_session_detail_result)
+            else:
+                self._handle_session_list_command()
+        elif result is None:
+            return
+        else:
+            self._handle_session_list_command()
+
+    def _handle_session_detail_result(self, result) -> None:
+        if result is None:
+            self._handle_session_list_command()
+            return
+        if isinstance(result, tuple) and result[0] == "load":
+            outcome = self.controller.load_session_direct(result[1])
+            self._write_message("system", outcome.message)
+            if outcome.success:
+                self._rebuild_chat_view()
+                self._refresh_features()
+            return
+        if isinstance(result, tuple) and result[0] == "delete":
+            outcome = self.controller.delete_session_direct(result[1])
+            self._write_message("system", outcome.message)
+        self._handle_session_list_command()
+
+    def _open_session_save_modal(self) -> None:
+        default = self._default_session_title()
+        modal = SessionSaveModal(default)
+        self.app.push_screen(modal, self._handle_session_save_result)
+
+    def _handle_session_save_result(self, title: str | None) -> None:
+        if title is None:
+            self._handle_session_list_command()
+            return
+        outcome = self.controller.save_session_direct(title)
+        self._write_message("system", outcome.message)
+        self._handle_session_list_command()
+
+    def _handle_session_save_command(self, args: str) -> None:
+        if args.strip():
+            outcome = self.controller.save_session_direct(args.strip())
+            self._write_message("system", outcome.message)
+        else:
+            self._open_session_save_modal_from_command()
+
+    def _open_session_save_modal_from_command(self) -> None:
+        default = self._default_session_title()
+        modal = SessionSaveModal(default)
+        self.app.push_screen(modal, self._handle_session_save_command_result)
+
+    def _handle_session_save_command_result(self, title: str | None) -> None:
+        if title is None:
+            return
+        outcome = self.controller.save_session_direct(title)
+        self._write_message("system", outcome.message)
+
+    def _handle_session_load_command(self, args: str) -> None:
+        if not args.strip():
+            self._write_message("system", "Usage: /session-load <id>")
+            return
+        outcome = self.controller.load_session_direct(args.strip())
+        self._write_message("system", outcome.message)
+        if outcome.success:
+            self._rebuild_chat_view()
+            self._refresh_features()
+
+    def _handle_session_summary_command(self) -> None:
+        self.status_bar.set_state("Generating session summary...")
+        result = self.controller.run_session_summary()
+        self._write_message("system", result.message)
+        self.status_bar.set_state("Ready")
+        if result.success:
+            self._refresh_features()
+
     def _handle_skills_modal_result(self, result: Any) -> None:
         if result == "new":
             self.app.push_screen(SkillCreateModal(), self._handle_skill_create_result)
@@ -968,6 +1072,14 @@ class SoulForgeApp(App):
             self._handle_task_accept_command(args)
         elif command == "/task-reject":
             self._handle_task_reject_command(args)
+        elif command == "/session-list":
+            self._handle_session_list_command()
+        elif command == "/session-save":
+            self._handle_session_save_command(args)
+        elif command == "/session-load":
+            self._handle_session_load_command(args)
+        elif command == "/session-summary":
+            self._handle_session_summary_command()
         else:
             self._write_message(
                 "system", f"Unknown command: {command}. Type /help."

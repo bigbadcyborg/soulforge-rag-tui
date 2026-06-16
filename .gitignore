@@ -19,6 +19,9 @@ chromaDb/
 # Local env/config
 .env
 
+# Saved conversation sessions (user data)
+app/sessions/*.json
+
 # OS/editor junk
 .DS_Store
 Thumbs.db

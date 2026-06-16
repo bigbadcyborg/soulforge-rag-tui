@@ -178,6 +178,16 @@ class TasksConfig:
 
 
 @dataclass
+class SessionsConfig:
+    store_path: str = "./app/sessions"
+    max_saved_sessions: int = 50
+
+    @property
+    def store_dir(self) -> Path:
+        return resolve_path(self.store_path)
+
+
+@dataclass
 class AppConfig:
     model: ModelConfig
     generation: GenerationConfig
@@ -187,6 +197,7 @@ class AppConfig:
     skills: SkillsConfig
     curator: CuratorConfig
     tasks: TasksConfig
+    sessions: SessionsConfig
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -291,6 +302,12 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         kanban_path=tasks_section.get("kanbanPath", "./app/tasks/kanban.json"),
     )
 
+    sessions_section = _section(data, "sessions")
+    sessions = SessionsConfig(
+        store_path=sessions_section.get("storePath", "./app/sessions"),
+        max_saved_sessions=sessions_section.get("maxSavedSessions", 50),
+    )
+
     return AppConfig(
         model=model,
         generation=generation,
@@ -300,6 +317,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         skills=skills,
         curator=curator,
         tasks=tasks,
+        sessions=sessions,
         raw=data,
     )
 

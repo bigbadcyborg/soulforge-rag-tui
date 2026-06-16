@@ -441,3 +441,42 @@ MemoryReviewModal {
 #task-create-container Input {
     margin-bottom: 1;
 }
+
+/* Session Modals */
+#session-browser-container,
+#session-detail-container,
+#session-save-container {
+    width: 72;
+    height: 30;
+    background: $surface;
+    border: solid $primary;
+    padding: 1 2;
+}
+
+#session-browser-scroll,
+#session-detail-scroll {
+    height: 1fr;
+    margin-bottom: 1;
+    border: solid $panel;
+    padding: 0 1;
+    scrollbar-size-vertical: 1;
+}
+
+.session-list-item {
+    width: 100%;
+    margin-bottom: 1;
+}
+
+.session-empty {
+    color: $text-muted;
+    padding: 1 0;
+}
+
+#session-detail-content {
+    width: 100%;
+    color: $text-muted;
+}
+
+#session-save-container Input {
+    margin-bottom: 1;
+}

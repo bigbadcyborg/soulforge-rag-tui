@@ -202,6 +202,26 @@ COMMANDS: tuple[CommandHelp, ...] = (
         "/task-reject <id>",
         "Dismiss a pending task suggestion by ID (CLI)",
     ),
+    CommandHelp(
+        "Sessions",
+        "/session-list",
+        "List saved conversations (TUI opens browser modal)",
+    ),
+    CommandHelp(
+        "Sessions",
+        "/session-save [title]",
+        "Save current chat to app/sessions/ (modal in TUI if no title)",
+    ),
+    CommandHelp(
+        "Sessions",
+        "/session-load <id>",
+        "Restore a saved conversation and rebuild the chat view",
+    ),
+    CommandHelp(
+        "Sessions",
+        "/session-summary",
+        "LLM summary of current chat written to session.md for prompt injection",
+    ),
 )
 
 
@@ -315,11 +335,41 @@ def format_crystallize_help_text(config: AppConfig | None = None) -> str:
     )
 
 
+def format_sessions_help_text() -> str:
+    return "\n".join(
+        [
+            "Session persistence — quick guide",
+            "",
+            "Saved conversations vs session.md:",
+            "  • /session-save stores full chat history in app/sessions/<id>.json",
+            "  • /session-summary writes a compact summary to app/memory/session.md",
+            "  • session.md is injected when memory is enabled (short-term context)",
+            "",
+            "Workflow:",
+            "  1. Chat normally",
+            "  2. /session-save My project chat",
+            "  3. Quit and restart later",
+            "  4. /session-list then /session-load <id>",
+            "  5. /session-summary before ending to capture notes in session.md",
+            "",
+            "Related commands:",
+            "  /session-list      Browse saved sessions",
+            "  /session-save    Persist current conversation",
+            "  /session-load    Resume a saved conversation",
+            "  /session-summary Generate and inject session summary",
+            "",
+            "Back to all commands: /help",
+        ]
+    )
+
+
 def format_help_text(topic: str = "", config: AppConfig | None = None) -> str:
     """Format command help for /help or /help <topic>."""
     topic_key = topic.strip().lower()
     if topic_key in ("crystallize", "crystallization", "skills"):
         return format_crystallize_help_text(config)
+    if topic_key in ("sessions", "session"):
+        return format_sessions_help_text()
 
     lines = ["Available commands:", ""]
     current_category = ""

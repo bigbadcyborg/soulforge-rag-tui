@@ -43,6 +43,9 @@ from app.skills.skill_crystallizer import (
 )
 from app.skills.skill_manager import SkillManager
 from app.skills.workflow_observer import WorkflowMarkResult, WorkflowObserver
+from app.sessions.session_manager import SessionManager
+from app.sessions.session_summarizer import generate_summary
+from app.memory.memory_reviewer import _strip_user_turn
 from app.tasks.task_manager import COLUMN_LABELS, TaskManager, normalize_column
 from app.tasks.task_suggester import (
     ACTION_CREATE,
@@ -101,6 +104,22 @@ class TaskSuggestResult:
         return bool(self.suggestions)
 
 
+@dataclass
+class SessionActionResult:
+    success: bool
+    message: str = ""
+    session_id: str = ""
+    title: str = ""
+
+
+@dataclass
+class SessionSummaryResult:
+    success: bool
+    message: str = ""
+    summary: str = ""
+    truncated: bool = False
+
+
 def load_soul() -> str:
     """Load the persona from SOUL.md, or fall back to a neutral default."""
     if not SOUL_PATH.exists():
@@ -118,6 +137,7 @@ class ChatController:
         self.memory_manager = MemoryManager(config)
         self.skill_manager = SkillManager(config)
         self.task_manager = TaskManager(config)
+        self.session_manager = SessionManager(config)
         self.workflow_observer = WorkflowObserver(config)
         self.features = FeatureStateManager(config, on_change=self._on_feature_change)
 
@@ -129,6 +149,7 @@ class ChatController:
         self._dismissed_curator_ids: set[str] = set()
         self.pending_task_suggestions: list[TaskSuggestion] = []
         self._dismissed_task_suggestion_ids: set[str] = set()
+        self.active_session_id: str | None = None
 
         # RAG is initialized lazily to avoid loading embedding model at startup
         self._retriever: Retriever | None = None
@@ -951,6 +972,165 @@ class ChatController:
         return TaskActionResult(
             success=False,
             message=f"Unknown action '{suggestion.action}'.",
+        )
+
+    def get_conversation_messages(self) -> list[dict[str, str]]:
+        """Return user/assistant messages from the active conversation."""
+        return [
+            message
+            for message in self.messages
+            if message.get("role") in ("user", "assistant")
+        ]
+
+    @staticmethod
+    def message_for_display(message: dict[str, str]) -> str:
+        """Strip wrappers from stored user turns for TUI display."""
+        content = str(message.get("content", ""))
+        if message.get("role") == "user":
+            return _strip_user_turn(content)
+        return content
+
+    def _clear_pending_state(self) -> None:
+        self.pending_suggestion = None
+        self.pending_skill_suggestion = None
+        self._pending_crystallize_fingerprint = ""
+        self.pending_curator_findings = []
+        self._dismissed_curator_ids.clear()
+        self.pending_task_suggestions = []
+        self._dismissed_task_suggestion_ids.clear()
+
+    def list_sessions_view(self) -> str:
+        return self.session_manager.format_session_list()
+
+    def save_session_direct(self, title: str = "") -> SessionActionResult:
+        conversation = self.get_conversation_messages()
+        if not conversation:
+            return SessionActionResult(
+                success=False,
+                message="Nothing to save. Chat first, then run /session-save.",
+            )
+
+        existing_summary = ""
+        if self.active_session_id:
+            existing = self.session_manager.get_session(self.active_session_id)
+            if existing:
+                existing_summary = existing.summary
+
+        saved = self.session_manager.save_session(
+            self.messages,
+            title=title,
+            summary=existing_summary,
+            turn_count=self.turn_count,
+            session_id=self.active_session_id,
+        )
+        if saved is None:
+            return SessionActionResult(success=False, message="Failed to save session.")
+        self.active_session_id = saved.id
+        return SessionActionResult(
+            success=True,
+            message=f"Saved session [{saved.id}] '{saved.title}'.",
+            session_id=saved.id,
+            title=saved.title,
+        )
+
+    def load_session_direct(self, session_id: str) -> SessionActionResult:
+        if not session_id.strip():
+            return SessionActionResult(
+                success=False,
+                message="Usage: /session-load <id>",
+            )
+        session = self.session_manager.get_session(session_id.strip())
+        if session is None:
+            return SessionActionResult(
+                success=False,
+                message=f"Session '{session_id}' not found.",
+            )
+
+        self._clear_pending_state()
+        self.turn_count = session.turn_count
+        self.active_session_id = session.id
+        self.messages = [
+            {"role": "system", "content": self._build_system_prompt()},
+            *session.messages,
+        ]
+        self.last_retrieved_chunks = []
+
+        if session.summary.strip() and self.features.is_enabled("memory"):
+            self.memory_manager.save("session", session.summary)
+
+        self._rebuild_system_prompt()
+        return SessionActionResult(
+            success=True,
+            message=(
+                f"Loaded session [{session.id}] '{session.title}' "
+                f"({len(session.messages)} messages, {session.turn_count} turns)."
+            ),
+            session_id=session.id,
+            title=session.title,
+        )
+
+    def delete_session_direct(self, session_id: str) -> SessionActionResult:
+        if not session_id.strip():
+            return SessionActionResult(success=False, message="Session ID required.")
+        session = self.session_manager.get_session(session_id.strip())
+        if session is None:
+            return SessionActionResult(
+                success=False,
+                message=f"Session '{session_id}' not found.",
+            )
+        if not self.session_manager.delete_session(session.id):
+            return SessionActionResult(
+                success=False,
+                message=f"Failed to delete session '{session_id}'.",
+            )
+        if self.active_session_id == session.id:
+            self.active_session_id = None
+        return SessionActionResult(
+            success=True,
+            message=f"Deleted session '{session.id}'.",
+        )
+
+    def run_session_summary(self) -> SessionSummaryResult:
+        conversation = self.get_conversation_messages()
+        if not conversation:
+            return SessionSummaryResult(
+                success=False,
+                message="Nothing to summarize. Chat first, then run /session-summary.",
+            )
+
+        summary = generate_summary(self.runtime, self.messages)
+        if not summary.strip():
+            return SessionSummaryResult(
+                success=False,
+                message="Failed to generate session summary.",
+            )
+
+        truncated = False
+        if self.features.is_enabled("memory"):
+            _, truncated = self.memory_manager.save("session", summary)
+            self.reload_memory()
+        else:
+            if self.active_session_id:
+                self.session_manager.update_summary(self.active_session_id, summary)
+            return SessionSummaryResult(
+                success=True,
+                message=(
+                    "Summary saved to active session file only (memory feature is off). "
+                    "Enable memory to inject session.md into prompts."
+                ),
+                summary=summary,
+                truncated=truncated,
+            )
+
+        if self.active_session_id:
+            self.session_manager.update_summary(self.active_session_id, summary)
+
+        note = " (truncated to session.md limit)" if truncated else ""
+        return SessionSummaryResult(
+            success=True,
+            message=f"Session summary updated{note}. Injected into session.md.",
+            summary=summary,
+            truncated=truncated,
         )
 
     def add_user_turn(self, user_input: str) -> list[RetrievedChunk]:

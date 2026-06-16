@@ -54,3 +54,6 @@ curator:
   bloatMaxChars: 1000
 tasks:
   kanbanPath: ./app/tasks/kanban.json
+sessions:
+  storePath: ./app/sessions
+  maxSavedSessions: 50

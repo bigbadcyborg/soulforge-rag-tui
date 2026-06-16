@@ -17,6 +17,7 @@ from app.skills.skill_crystallizer import SkillSuggestion
 from app.skills.curator import CuratorFinding, format_finding_view
 from app.tasks.task_manager import COLUMN_LABELS, COLUMNS, Task
 from app.tasks.task_suggester import TaskSuggestion, format_suggestion_view
+from app.sessions.session_manager import SessionMeta
 from app.rag.retriever import RetrievedChunk, Retriever
 
 ROLE_LABELS = {
@@ -717,4 +718,101 @@ class TaskSuggestionModal(ModalScreen):
             self.dismiss(("approve", self.suggestion.suggestion_id))
         elif event.button.id == "ignore-button":
             self.dismiss(("ignore", self.suggestion.suggestion_id))
+
+
+class SessionBrowserModal(ModalScreen):
+    """Modal for browsing saved conversation sessions."""
+
+    def __init__(self, sessions: list[SessionMeta]) -> None:
+        super().__init__()
+        self.sessions = sessions
+
+    def compose(self):
+        with Vertical(id="session-browser-container"):
+            yield Label("Saved Sessions")
+            with VerticalScroll(id="session-browser-scroll"):
+                if not self.sessions:
+                    yield Static("(no saved sessions)", classes="session-empty")
+                for session in self.sessions:
+                    label = f"[{session.id}] {session.title} ({session.message_count} msgs)"
+                    yield Button(
+                        label,
+                        id=f"session_btn_{session.id}",
+                        classes="session-list-item",
+                    )
+            with Container(id="button-container"):
+                yield Button("Save Current", id="save-current-button", variant="success")
+                yield Button("Close", id="close-button")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "close-button":
+            self.dismiss(None)
+        elif event.button.id == "save-current-button":
+            self.dismiss("save")
+        elif event.button.id and event.button.id.startswith("session_btn_"):
+            session_id = event.button.id.replace("session_btn_", "", 1)
+            self.dismiss(("view", session_id))
+
+
+class SessionDetailModal(ModalScreen):
+    """Modal for viewing a saved session and loading or deleting it."""
+
+    def __init__(self, session: SessionMeta) -> None:
+        super().__init__()
+        self.session_meta = session
+
+    def compose(self):
+        summary = self.session_meta.summary or "(no summary)"
+        detail = (
+            f"ID: {self.session_meta.id}\n"
+            f"Created: {self.session_meta.created_at}\n"
+            f"Updated: {self.session_meta.updated_at}\n"
+            f"Turns: {self.session_meta.turn_count}\n"
+            f"Messages: {self.session_meta.message_count}\n\n"
+            f"Summary:\n{summary}"
+        )
+        with Vertical(id="session-detail-container"):
+            yield Label(f"Session: {self.session_meta.title}")
+            with VerticalScroll(id="session-detail-scroll"):
+                yield Static(detail, id="session-detail-content")
+            with Container(id="button-container"):
+                yield Button("Load", id="load-button", variant="primary")
+                yield Button("Delete", id="delete-button", variant="error")
+                yield Button("Back", id="back-button")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "back-button":
+            self.dismiss(None)
+        elif event.button.id == "load-button":
+            self.dismiss(("load", self.session_meta.id))
+        elif event.button.id == "delete-button":
+            self.dismiss(("delete", self.session_meta.id))
+
+
+class SessionSaveModal(ModalScreen):
+    """Modal for naming a session before save."""
+
+    def __init__(self, default_title: str = "") -> None:
+        super().__init__()
+        self.default_title = default_title
+
+    def compose(self):
+        with Vertical(id="session-save-container"):
+            yield Label("Save Session")
+            yield Label("Title:")
+            yield Input(
+                value=self.default_title,
+                placeholder="Session title",
+                id="session-title-input",
+            )
+            with Container(id="button-container"):
+                yield Button("Save", id="save-button", variant="success")
+                yield Button("Cancel", id="cancel-button")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "cancel-button":
+            self.dismiss(None)
+        elif event.button.id == "save-button":
+            title = self.query_one("#session-title-input", Input).value.strip()
+            self.dismiss(title or self.default_title)
 
