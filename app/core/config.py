@@ -486,6 +486,54 @@ def onboarding_to_yaml_dict(onboarding: OnboardingConfig) -> dict[str, bool]:
     return {"completed": onboarding.completed}
 
 
+def model_to_yaml_dict(model: ModelConfig) -> dict[str, Any]:
+    """Convert a ModelConfig to the camelCase dict written under ``model:``."""
+    return {
+        "chatModelPath": model.chat_model_path,
+        "embeddingModelPath": model.embedding_model_path,
+        "contextSize": model.context_size,
+        "gpuLayers": model.gpu_layers,
+        "threads": model.threads,
+        "chatFormat": model.chat_format,
+    }
+
+
+def save_chat_model(
+    config: AppConfig,
+    path: str | Path | None = None,
+) -> None:
+    """Persist the current chat model path to ``config.yaml`` (atomic write)."""
+    config_path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
+
+    if config_path.exists():
+        with config_path.open("r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+    else:
+        data = dict(config.raw) if config.raw else {}
+
+    model_section = dict(data.get("model") or {})
+    model_section["chatModelPath"] = config.model.chat_model_path
+    data["model"] = model_section
+    config.raw = data
+
+    directory = config_path.parent
+    directory.mkdir(parents=True, exist_ok=True)
+
+    fd, temp_path = tempfile.mkstemp(
+        dir=directory,
+        prefix=".config-",
+        suffix=".yaml.tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            yaml.safe_dump(data, handle, default_flow_style=False, sort_keys=False)
+        os.replace(temp_path, config_path)
+    except Exception:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+        raise
+
+
 def save_onboarding(
     config: AppConfig,
     path: str | Path | None = None,

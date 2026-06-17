@@ -1,4 +1,5 @@
 model:
+  # chatModelPath can also be changed at runtime with /model
   chatModelPath: ./models/NemoMix-Unleashed-12B-Q4_K_M.gguf
   embeddingModelPath: ./models/embedding-model.gguf
   contextSize: 8192

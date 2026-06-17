@@ -118,6 +118,53 @@ def _handle_tools_cli(controller: ChatController, args: str) -> None:
     print("Usage: /tools | /tools test <name> '<json>' | /tools add-shell <cmd> | /tools allowlist")
 
 
+def _handle_model_cli(controller: ChatController, args: str) -> None:
+    stripped = args.strip()
+    if not stripped:
+        print(f"Current model: {controller.model_name}")
+        return
+
+    if stripped.lower() == "list":
+        print(controller.format_model_list())
+        return
+
+    parts = stripped.split()
+    if parts[0].lower() == "add":
+        if len(parts) < 2:
+            print("Usage: /model add <path> [switch]")
+            return
+        switch_after = len(parts) >= 3 and parts[-1].lower() == "switch"
+        source = " ".join(parts[1:-1] if switch_after else parts[1:])
+        try:
+            print("Importing model...")
+            
+            def on_progress(copied: int, total: int) -> None:
+                pct = int((copied / total) * 100) if total else 0
+                gb_copied = copied / (1024**3)
+                gb_total = total / (1024**3)
+                print(f"\rImporting: {pct}% ({gb_copied:.1f} GB / {gb_total:.1f} GB)", end="", flush=True)
+
+            message = controller.import_chat_model(
+                source, 
+                switch_after=switch_after,
+                on_progress=on_progress,
+            )
+            print()  # newline after progress
+        except (OSError, ValueError, FileNotFoundError) as error:
+            print(f"\nModel import failed: {error}")
+            return
+        print(message)
+        return
+
+    try:
+        print("Switching model...")
+        name = controller.switch_chat_model(stripped)
+    except (OSError, ValueError, FileNotFoundError) as error:
+        print(f"Model switch failed: {error}")
+        return
+    print(f"Switched to model: {name}")
+
+
 def _handle_features_cli(controller: ChatController, args: str) -> None:
     if not args or args.lower() == "list":
         print("Feature flags:")
@@ -556,6 +603,8 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
         print("Run: python -m app.main")
     elif command == "/features":
         _handle_features_cli(controller, args)
+    elif command == "/model":
+        _handle_model_cli(controller, args)
     elif command == "/ingest":
         _handle_ingest_cli(controller)
     elif command == "/sources":

@@ -40,7 +40,6 @@ ChatMessage.role-system {
 }
 
 #prompt {
-    dock: bottom;
     height: 6;
     max-height: 40%;
     min-height: 3;
@@ -98,6 +97,35 @@ RagSelectionModal {
 
 #rag-modal-container Checkbox {
     margin: 0 0 1 0;
+}
+
+#model-modal-container, #add-model-modal-container {
+    width: 64;
+    height: auto;
+    max-height: 80%;
+    background: $surface;
+    border: solid $primary;
+    padding: 1 2;
+}
+
+#model-list-scroll {
+    height: 14;
+    margin-bottom: 1;
+    border: solid $panel;
+    padding: 0 1;
+}
+
+#model-list-empty {
+    margin-bottom: 1;
+    color: $text-muted;
+}
+
+#add-model-modal-container Input {
+    margin-bottom: 1;
+}
+
+#add-model-modal-container Checkbox {
+    margin-bottom: 1;
 }
 
 #button-container {

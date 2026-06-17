@@ -8,6 +8,7 @@ environments (tests, tooling) without the native dependency.
 
 from __future__ import annotations
 
+import gc
 import threading
 from typing import TYPE_CHECKING, Any, Iterator
 
@@ -37,6 +38,22 @@ class ModelRuntime:
         with self._lock:
             return self._load_chat_model_unlocked()
 
+    def unload_chat_model(self) -> None:
+        """Release the loaded chat model and reset compute backend detection."""
+        with self._lock:
+            self._chat = None
+            self._compute_backend = UNKNOWN
+        gc.collect()
+
+    def reload_chat_model(self) -> "Llama":
+        """Unload and load the chat model from the current config path."""
+        with self._lock:
+            self._chat = None
+            self._compute_backend = UNKNOWN
+        gc.collect()
+        with self._lock:
+            return self._load_chat_model_unlocked(force=True)
+
     def load_embedding_model(self) -> "Llama":
         """Load the GGUF embedding model, raising a clear error if missing."""
         with self._lock:
@@ -61,8 +78,8 @@ class ModelRuntime:
         params.update(overrides)
         return params
 
-    def _load_chat_model_unlocked(self) -> "Llama":
-        if self._chat is not None:
+    def _load_chat_model_unlocked(self, *, force: bool = False) -> "Llama":
+        if self._chat is not None and not force:
             return self._chat
 
         from llama_cpp import Llama

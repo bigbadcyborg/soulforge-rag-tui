@@ -10,10 +10,11 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Iterator
 
 from app.core.compute_backend import ComputeBackend
-from app.core.config import PROJECT_ROOT, AppConfig, save_onboarding, save_tools
+from app.core.config import PROJECT_ROOT, AppConfig, save_chat_model, save_onboarding, save_tools
 from app.core.diagnostics import (
     format_config_view,
     format_diagnostics_view,
@@ -21,6 +22,12 @@ from app.core.diagnostics import (
     run_startup_diagnostics,
 )
 from app.core.feature_state import FeatureStateManager
+from app.core.model_catalog import (
+    import_chat_model as catalog_import_chat_model,
+    list_available_chat_models,
+    path_for_config,
+    resolve_chat_model_selection,
+)
 from app.core.model_runtime import ModelRuntime
 from app.core.prompt_builder import PromptBuilder
 from app.memory.memory_manager import MemoryManager, MemorySnapshot
@@ -273,6 +280,67 @@ class ChatController:
     def reload_memory(self) -> None:
         """Reload memory files and rebuild the system prompt without restarting."""
         self._rebuild_system_prompt()
+
+    def list_chat_models(self) -> list[str]:
+        """Return available chat model filenames from ``./models/``."""
+        return [path.name for path in list_available_chat_models(self.config)]
+
+    def format_model_list(self) -> str:
+        """Return a human-readable model list with the active model marked."""
+        current = self.config.model.chat_model.resolve()
+        lines: list[str] = []
+        for path in list_available_chat_models(self.config):
+            marker = "*" if path.resolve() == current else " "
+            lines.append(f"{marker} {path.name}")
+        if not lines:
+            return "No chat models found in ./models/. Use /model add <path> to import one."
+        return "\n".join(lines)
+
+    def switch_chat_model(self, model_path: str | Path, *, persist: bool = True) -> str:
+        """Unload the current chat model, load *model_path*, and optionally persist."""
+        resolved = resolve_chat_model_selection(str(model_path), self.config)
+        if not resolved.exists():
+            raise FileNotFoundError(f"Chat model not found: {resolved}")
+
+        current = self.config.model.chat_model.resolve()
+        if resolved.resolve() == current:
+            return resolved.name
+
+        old_path = self.config.model.chat_model_path
+        self.runtime.unload_chat_model()
+        self.config.model.chat_model_path = path_for_config(resolved)
+
+        try:
+            self.runtime.load_chat_model()
+        except Exception:
+            self.config.model.chat_model_path = old_path
+            try:
+                self.runtime.load_chat_model()
+            except Exception:
+                self.loaded = False
+            raise
+
+        if persist:
+            save_chat_model(self.config)
+        self.loaded = True
+        return self.model_name
+
+    def import_chat_model(
+        self,
+        source_path: str | Path,
+        *,
+        switch_after: bool = False,
+        persist: bool = True,
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> str:
+        """Copy a ``.gguf`` into ``./models/`` and optionally switch to it."""
+        source = Path(source_path).expanduser()
+        dest = catalog_import_chat_model(source, on_progress=on_progress)
+        message = f"Imported model as {dest.name}."
+        if switch_after:
+            name = self.switch_chat_model(dest, persist=persist)
+            return f"{message} Switched to {name}."
+        return message
 
     def get_memory_view(self) -> str:
         """Return formatted memory content with character counts."""

@@ -24,6 +24,31 @@ COMMANDS: tuple[CommandHelp, ...] = (
     ),
     CommandHelp("General", "/status", "Show model name, active features, and app state"),
     CommandHelp(
+        "Model",
+        "/model",
+        "Open model picker (TUI) or show current model (CLI)",
+    ),
+    CommandHelp(
+        "Model",
+        "/model list",
+        "List chat models in ./models/ (* marks current)",
+    ),
+    CommandHelp(
+        "Model",
+        "/model add <path>",
+        "Import a .gguf file into ./models/ by copying it",
+    ),
+    CommandHelp(
+        "Model",
+        "/model add <path> switch",
+        "Import a .gguf and switch to it immediately",
+    ),
+    CommandHelp(
+        "Model",
+        "/model <name>",
+        "Switch to a chat model by filename or unique partial match",
+    ),
+    CommandHelp(
         "General",
         "/health",
         "Short pass/warn/fail summary with top remediation hints",

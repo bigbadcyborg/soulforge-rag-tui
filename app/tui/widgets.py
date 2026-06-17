@@ -10,7 +10,7 @@ from textual import events
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
-from textual.widgets import Button, Checkbox, Label, Static, TextArea, Input
+from textual.widgets import Button, Checkbox, Label, RadioButton, RadioSet, Static, TextArea, Input
 
 from app.core.compute_backend import ComputeBackend, UNKNOWN
 from app.core.feature_state import FEATURE_KEYS
@@ -241,6 +241,78 @@ class RagSelectionModal(ModalScreen):
             for sanitized_id in self.id_to_source.keys():
                 checkbox = self.query_one(f"#{sanitized_id}", Checkbox)
                 checkbox.value = event.checkbox.value
+
+
+MODEL_ADD_SENTINEL = "__model_add__"
+
+
+class ModelSelectionModal(ModalScreen):
+    """Modal for choosing a chat model to switch to."""
+
+    def __init__(self, models: list[str], current: str) -> None:
+        super().__init__()
+        self.models = models
+        self.current = current
+
+    def compose(self):
+        with Vertical(id="model-modal-container"):
+            yield Label("Select a chat model:")
+            if self.models:
+                with VerticalScroll(id="model-list-scroll"):
+                    with RadioSet(id="model-radio-set"):
+                        for name in self.models:
+                            label = f"{name} (current)" if name == self.current else name
+                            yield RadioButton(label, value=name)
+            else:
+                yield Static(
+                    "No chat models in ./models/. Use Add model to import a .gguf file.",
+                    id="model-list-empty",
+                )
+            with Container(id="button-container"):
+                yield Button("Add model...", id="add-model-button")
+                yield Button("Switch", id="switch-model-button", variant="primary")
+                yield Button("Cancel", id="cancel-model-button")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "cancel-model-button":
+            self.dismiss(None)
+            return
+        if event.button.id == "add-model-button":
+            self.dismiss(MODEL_ADD_SENTINEL)
+            return
+        if event.button.id == "switch-model-button":
+            if not self.models:
+                self.dismiss(None)
+                return
+            radio_set = self.query_one("#model-radio-set", RadioSet)
+            pressed = radio_set.pressed_button
+            selected = pressed.value if pressed is not None else self.current
+            self.dismiss(selected)
+
+
+class AddModelModal(ModalScreen):
+    """Modal for importing a .gguf file into ./models/."""
+
+    def compose(self):
+        with Vertical(id="add-model-modal-container"):
+            yield Label("Import a .gguf file into ./models/:")
+            yield Input(placeholder="/path/to/model.gguf", id="add-model-path")
+            yield Checkbox("Switch to this model after import", id="switch-after-checkbox")
+            with Container(id="button-container"):
+                yield Button("Import", id="import-model-button", variant="primary")
+                yield Button("Cancel", id="cancel-add-model-button")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "cancel-add-model-button":
+            self.dismiss(None)
+            return
+        if event.button.id == "import-model-button":
+            source = self.query_one("#add-model-path", Input).value.strip()
+            if not source:
+                self.dismiss(None)
+                return
+            switch_after = self.query_one("#switch-after-checkbox", Checkbox).value
+            self.dismiss((source, switch_after))
 
 
 FEATURE_TOGGLE_LABELS: dict[str, str] = {

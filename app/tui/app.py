@@ -49,6 +49,9 @@ from app.tui.widgets import (
     SessionBrowserModal,
     SessionDetailModal,
     SessionSaveModal,
+    ModelSelectionModal,
+    AddModelModal,
+    MODEL_ADD_SENTINEL,
     TutorialFinished,
     TutorialWizardPanel,
 )
@@ -201,6 +204,37 @@ class SoulForgeApp(App):
             )
         finally:
             self.call_from_thread(self._ingest_done)
+
+    @work(thread=True, exclusive=True, group="model")
+    def _switch_model(self, model_name: str) -> None:
+        try:
+            name = self.controller.switch_chat_model(model_name)
+        except Exception as error:  # noqa: BLE001
+            self.call_from_thread(self._on_model_switch_failed, str(error))
+            return
+        self.call_from_thread(self._on_model_switch_complete, name)
+
+    @work(thread=True, exclusive=True, group="model")
+    def _import_model(self, source_path: str, switch_after: bool = False) -> None:
+        def on_progress(copied: int, total: int) -> None:
+            pct = int((copied / total) * 100) if total else 0
+            gb_copied = copied / (1024**3)
+            gb_total = total / (1024**3)
+            self.call_from_thread(
+                self.status_bar.set_state,
+                f"Importing: {pct}% ({gb_copied:.1f} GB / {gb_total:.1f} GB)"
+            )
+
+        try:
+            message = self.controller.import_chat_model(
+                source_path,
+                switch_after=switch_after,
+                on_progress=on_progress,
+            )
+        except Exception as error:  # noqa: BLE001
+            self.call_from_thread(self._on_model_import_failed, str(error))
+            return
+        self.call_from_thread(self._on_model_import_complete, message, switch_after)
 
     # --- worker callbacks (UI thread) ---------------------------------------
 
@@ -372,6 +406,98 @@ class SoulForgeApp(App):
         self.prompt.disabled = False
         self.prompt.focus()
         self._refresh_features()
+
+    def _on_model_switch_complete(self, model_name: str) -> None:
+        self.models_ready = True
+        self.status_bar.set_model(model_name)
+        self.status_bar.set_compute(self.controller.compute_backend)
+        self.status_bar.set_state("Ready")
+        self.prompt.disabled = False
+        self.prompt.focus()
+        self._write_message("system", f"Switched to model: {model_name}")
+
+    def _on_model_switch_failed(self, error: str) -> None:
+        self.models_ready = self.controller.loaded
+        self.status_bar.set_model(self.controller.model_name)
+        self.status_bar.set_compute(self.controller.compute_backend)
+        self.status_bar.set_state("Ready" if self.controller.loaded else "Switch failed")
+        self.prompt.disabled = False
+        self.prompt.focus()
+        self._write_message("system", f"Model switch failed: {error}")
+
+    def _on_model_import_complete(self, message: str, switch_after: bool) -> None:
+        self.models_ready = True
+        if switch_after:
+            self.status_bar.set_model(self.controller.model_name)
+            self.status_bar.set_compute(self.controller.compute_backend)
+        self.status_bar.set_state("Ready")
+        self.prompt.disabled = False
+        self.prompt.focus()
+        self._write_message("system", message)
+
+    def _on_model_import_failed(self, error: str) -> None:
+        self.status_bar.set_state("Ready")
+        self.prompt.disabled = False
+        self.prompt.focus()
+        self._write_message("system", f"Model import failed: {error}")
+
+    def _begin_model_job(self, state: str) -> None:
+        self.models_ready = False
+        self.prompt.disabled = True
+        self.status_bar.set_state(state)
+
+    def _handle_model_command(self, args: str) -> None:
+        if not self.models_ready:
+            self._write_message("system", "Model is still loading, please wait.")
+            return
+
+        stripped = args.strip()
+        if not stripped or stripped.lower() == "list":
+            self._write_message("system", self.controller.format_model_list())
+            return
+
+        parts = stripped.split()
+        if parts[0].lower() == "add":
+            if len(parts) < 2:
+                self._write_message(
+                    "system",
+                    "Usage: /model add <path> [switch]",
+                )
+                return
+            switch_after = len(parts) >= 3 and parts[-1].lower() == "switch"
+            source = " ".join(parts[1:-1] if switch_after else parts[1:])
+            self._begin_model_job("Importing model...")
+            self._import_model(source, switch_after=switch_after)
+            return
+
+        self._begin_model_job("Switching model...")
+        self._switch_model(stripped)
+
+    def _open_model_modal(self) -> None:
+        models = self.controller.list_chat_models()
+        modal = ModelSelectionModal(models, self.controller.model_name)
+        self.app.push_screen(modal, self._handle_model_modal_result)
+
+    def _handle_model_modal_result(self, result: str | None) -> None:
+        if result is None:
+            self._write_message("system", "Model selection cancelled.")
+            return
+        if result == MODEL_ADD_SENTINEL:
+            self.app.push_screen(AddModelModal(), self._handle_add_model_modal_result)
+            return
+        self._begin_model_job("Switching model...")
+        self._switch_model(result)
+
+    def _handle_add_model_modal_result(
+        self,
+        result: tuple[str, bool] | None,
+    ) -> None:
+        if result is None:
+            self._write_message("system", "Model import cancelled.")
+            return
+        source, switch_after = result
+        self._begin_model_job("Importing model...")
+        self._import_model(source, switch_after=switch_after)
 
     # --- helpers (UI thread) -------------------------------------------------
 
@@ -1213,6 +1339,11 @@ class SoulForgeApp(App):
             self._handle_rag_command(args)
         elif command == "/features":
             self._handle_features_command(args)
+        elif command == "/model":
+            if args.strip():
+                self._handle_model_command(args)
+            else:
+                self._open_model_modal()
         elif command == "/reload-soul":
             if not self.models_ready:
                 self._write_message("system", "Model is still loading, please wait.")
