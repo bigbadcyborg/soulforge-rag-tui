@@ -6,8 +6,6 @@ llama-cpp-python
 chromadb>=0.5,<1.0
 PyYAML>=6.0,<7.0
 textual>=0.67,<1.0
-fastapi>=0.115,<1.0
-uvicorn>=0.30,<1.0
 
 # Document ingestion / OCR helpers.
 pypdf>=4.0,<6.0

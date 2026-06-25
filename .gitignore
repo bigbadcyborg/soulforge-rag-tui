@@ -26,9 +26,6 @@ app/sessions/*.json
 logs/*.log
 logs/tool_calls.jsonl
 
-# Fetched CVE cache
-data/cves.json
-
 # OS/editor junk
 .DS_Store
 Thumbs.db

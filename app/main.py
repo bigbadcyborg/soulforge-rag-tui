@@ -6,13 +6,11 @@ debugging. Both front ends drive the same :class:`ChatController`.
 
     python -m app.main          # TUI
     python -m app.main --cli    # plain terminal loop
-    python -m app.main --api    # CVE HTTP API
 """
 
 from __future__ import annotations
 
 import argparse
-import ipaddress
 import json
 
 from app.core.chat_controller import ChatController
@@ -796,28 +794,6 @@ def run_cli() -> None:
                 print("Run /memory-review, /memory-accept, or /memory-reject.")
 
 
-def _is_loopback_host(host: str) -> bool:
-    if host.lower() == "localhost":
-        return True
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False
-
-
-def run_api(host: str, port: int) -> None:
-    """Run the lightweight CVE API without loading the chat model."""
-    from app.api import create_app
-    import uvicorn
-
-    if not _is_loopback_host(host):
-        raise SystemExit(
-            "The CVE API is restricted to loopback hosts only. "
-            "Use --host 127.0.0.1, --host localhost, or --host ::1."
-        )
-    uvicorn.run(create_app(), host=host, port=port)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="SoulForge local chatbot")
     parser.add_argument(
@@ -825,28 +801,10 @@ def main() -> None:
         action="store_true",
         help="Run the plain terminal loop instead of the TUI.",
     )
-    parser.add_argument(
-        "--api",
-        action="store_true",
-        help="Run the CVE HTTP API instead of the chatbot UI.",
-    )
-    parser.add_argument(
-        "--host",
-        default="127.0.0.1",
-        help="Host to bind when running --api.",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=8010,
-        help="Port to bind when running --api.",
-    )
     args = parser.parse_args()
 
     try:
-        if args.api:
-            run_api(args.host, args.port)
-        elif args.cli:
+        if args.cli:
             run_cli()
         else:
             from app.tui.app import run_tui

@@ -1,4 +1,0 @@
-# Minimal dependencies for the CVE API/fetcher container.
-PyYAML>=6.0,<7.0
-fastapi>=0.115,<1.0
-uvicorn>=0.30,<1.0

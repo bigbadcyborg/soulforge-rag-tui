@@ -191,20 +191,6 @@ class SessionsConfig:
 
 
 @dataclass
-class CveConfig:
-    source_url: str = "https://services.nvd.nist.gov/rest/json/cves/2.0"
-    storage_path: str = "./data/cves.json"
-    default_hours: int = 24
-    default_limit: int = 50
-    max_items: int = 500
-    request_timeout_seconds: int = 20
-
-    @property
-    def storage_file(self) -> Path:
-        return resolve_path(self.storage_path)
-
-
-@dataclass
 class LoggingConfig:
     log_path: str = "./logs/soulforge.log"
     level: str = "info"
@@ -250,7 +236,6 @@ class AppConfig:
     curator: CuratorConfig
     tasks: TasksConfig
     sessions: SessionsConfig
-    cve: CveConfig = field(default_factory=CveConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     onboarding: OnboardingConfig = field(default_factory=OnboardingConfig)
@@ -365,18 +350,6 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         max_saved_sessions=sessions_section.get("maxSavedSessions", 50),
     )
 
-    cve_section = _section(data, "cve")
-    cve = CveConfig(
-        source_url=cve_section.get(
-            "sourceUrl", "https://services.nvd.nist.gov/rest/json/cves/2.0"
-        ),
-        storage_path=cve_section.get("storagePath", "./data/cves.json"),
-        default_hours=cve_section.get("defaultHours", 24),
-        default_limit=cve_section.get("defaultLimit", 50),
-        max_items=cve_section.get("maxItems", 500),
-        request_timeout_seconds=cve_section.get("requestTimeoutSeconds", 20),
-    )
-
     logging_section = _section(data, "logging")
     logging_cfg = LoggingConfig(
         log_path=logging_section.get("logPath", "./logs/soulforge.log"),
@@ -412,7 +385,6 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         curator=curator,
         tasks=tasks,
         sessions=sessions,
-        cve=cve,
         logging=logging_cfg,
         tools=tools_cfg,
         onboarding=onboarding,

@@ -58,13 +58,6 @@ tasks:
 sessions:
   storePath: ./app/sessions
   maxSavedSessions: 50
-cve:
-  sourceUrl: https://services.nvd.nist.gov/rest/json/cves/2.0
-  storagePath: ./data/cves.json
-  defaultHours: 24
-  defaultLimit: 50
-  maxItems: 500
-  requestTimeoutSeconds: 20
 logging:
   logPath: ./logs/soulforge.log
   level: info

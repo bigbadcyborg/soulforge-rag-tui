@@ -18,7 +18,6 @@ This project is designed to run locally (Windows/WSL) with CUDA acceleration for
 * **WSL 2 & CUDA support**: Optimized for NVIDIA GPUs (including Blackwell/RTX 5090) within WSL Ubuntu.
 * **Persona Hot-Reload**: Update `SOUL.md` and reload the character instantly with `/reload-soul`.
 * **Compute Indicator**: Status bar shows **GPU** or **CPU** after the model loads.
-* **CVE API mode**: Fetch recent CVEs from NVD, store a local deduplicated list, and expose it through HTTP endpoints.
 
 ## Commands
 
@@ -111,82 +110,6 @@ These steps assume Windows 11 with WSL Ubuntu installed.
      ```
 
 After startup, type `/help` in the TUI for all commands, or try `/status`, `/ingest`, `/rag on`, and `/tools`.
-
-## CVE API mode
-
-SoulForge can also run as a lightweight CVE API without loading the chat model:
-
-```bash
-python -m app.main --api --host 127.0.0.1 --port 8010
-```
-
-This API is intended for same-server automation only. It binds to loopback hosts only (`127.0.0.1`, `localhost`, or `::1`) and refuses public bindings like `0.0.0.0`. If you omit `--host` or `--port`, the API defaults to `127.0.0.1:8010`.
-
-From a second terminal, fetch the latest CVEs:
-
-```powershell
-Invoke-RestMethod -Method Post "http://127.0.0.1:8010/cves/fetch?hours=24&limit=50"
-```
-
-For a daily Windows Task Scheduler action, call the local endpoint from the hosting server:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Invoke-RestMethod -Method Post 'http://127.0.0.1:8010/cves/fetch?hours=24&limit=50'"
-```
-
-View the stored CVE list:
-
-```powershell
-Invoke-RestMethod "http://127.0.0.1:8010/cves?limit=50"
-```
-
-Filter by severity:
-
-```powershell
-Invoke-RestMethod "http://127.0.0.1:8010/cves?severity=CRITICAL"
-```
-
-Interactive API docs are available at `http://127.0.0.1:8010/docs`.
-
-Endpoints:
-
-* `GET /health`: API health and stored CVE count.
-* `POST /cves/fetch?hours=24&limit=50`: Fetch recent CVEs from NVD and merge them into the local list.
-* `GET /cves?limit=50`: Return stored CVEs, newest first.
-* `GET /cves?severity=CRITICAL`: Filter stored CVEs by severity.
-* `GET /cves/CVE-YYYY-NNNN`: Return one stored CVE by ID.
-
-Fetched CVEs are stored at `data/cves.json` by default. Change the NVD source URL, storage path, fetch window, and list limits under the `cve:` section in `config.yaml`.
-
-### Docker daily CVE fetcher
-
-For an automated daemon-style setup, run the CVE-only Docker container:
-
-```bash
-docker compose -f docker-compose.cve.yml up -d --build
-```
-
-The container starts the CVE API on `127.0.0.1:8010` inside the container only, performs one fetch at startup, then repeats every 24 hours. No port is published to the host, so the API is not externally reachable through Docker.
-
-The CVE list is persisted on the host at:
-
-```text
-data/cves.json
-```
-
-Useful commands:
-
-```bash
-docker compose -f docker-compose.cve.yml logs -f cve-fetcher
-docker compose -f docker-compose.cve.yml restart cve-fetcher
-docker compose -f docker-compose.cve.yml down
-```
-
-Tune the daily fetcher in `docker-compose.cve.yml`:
-
-* `CVE_FETCH_HOURS`: CVE publication lookback window, default `24`.
-* `CVE_FETCH_LIMIT`: max CVEs requested per fetch, default `50`.
-* `CVE_FETCH_INTERVAL_SECONDS`: interval between fetches, default `86400`.
 
 ## WSL Setup
 
